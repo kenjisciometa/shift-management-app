@@ -43,6 +43,13 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith(route)
   );
 
+  // If user is authenticated and trying to access login/signup, redirect to dashboard
+  if (user && (request.nextUrl.pathname === "/login" || request.nextUrl.pathname === "/signup")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
+  }
+
   if (!user && !isPublicRoute && request.nextUrl.pathname !== "/") {
     // No user, redirect to login page
     const url = request.nextUrl.clone();
