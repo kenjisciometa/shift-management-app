@@ -82,6 +82,7 @@ interface PTODashboardProps {
   teamRequests: PendingRequest[];
   policies: PTOPolicy[];
   isAdmin: boolean;
+  selectedYear?: number;
 }
 
 const statusColors: Record<string, string> = {
@@ -108,6 +109,7 @@ export function PTODashboard({
   teamRequests,
   policies,
   isAdmin,
+  selectedYear = new Date().getFullYear(),
 }: PTODashboardProps) {
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -149,8 +151,8 @@ export function PTODashboard({
         setRequests(requestsData.data || []);
       }
 
-      // Fetch balances
-      const balanceResponse = await fetch("/api/pto/balance");
+      // Fetch balances for selected year
+      const balanceResponse = await fetch(`/api/pto/balance?year=${selectedYear}`);
       const balanceData = await balanceResponse.json();
       if (balanceData.success) {
         setBalances(balanceData.data || []);
@@ -247,8 +249,36 @@ export function PTODashboard({
     return `${p.first_name[0]}${p.last_name[0]}`.toUpperCase();
   };
 
+  const currentYear = new Date().getFullYear();
+  const availableYears = Array.from({ length: 3 }, (_, i) => currentYear - i);
+
   return (
     <div className="space-y-6">
+      {/* Year Selector */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="year-selector">View Year:</Label>
+          <Select
+            value={selectedYear.toString()}
+            onValueChange={(value) => {
+              const year = parseInt(value);
+              router.push(`/pto?year=${year}`);
+            }}
+          >
+            <SelectTrigger id="year-selector" className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {availableYears.map((year) => (
+                <SelectItem key={year} value={year.toString()}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {/* Balance Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {balances.length > 0 ? (
