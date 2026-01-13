@@ -25,6 +25,8 @@ export default async function PTOPage({
   // Get year from search params or use current year
   const selectedYear = params.year ? parseInt(params.year) : new Date().getFullYear();
   const currentYear = new Date().getFullYear();
+  const yearStart = new Date(currentYear, 0, 1).toISOString().split("T")[0];
+  const yearEnd = new Date(currentYear, 11, 31).toISOString().split("T")[0];
 
   const supabase = await getCachedSupabase();
 
@@ -77,6 +79,7 @@ export default async function PTOPage({
           .eq("organization_id", profile.organization_id)
           .eq("status", "pending")
           .order("created_at", { ascending: false })
+          .limit(100)
           .then((result) => {
             if (result.error) {
               console.error("Error fetching pending requests:", result.error);
@@ -86,6 +89,7 @@ export default async function PTOPage({
           })
       : Promise.resolve({ data: [], error: null }),
     // Get team PTO requests for calendar view (approved and pending, current year)
+    // Optimized: Fetch requests where start_date <= yearEnd (uses index), then filter overlapping in memory
     supabase
       .from("pto_requests")
       .select(`
@@ -94,15 +98,18 @@ export default async function PTOPage({
       `)
       .eq("organization_id", profile.organization_id)
       .in("status", ["pending", "approved"])
-      .gte("end_date", new Date(currentYear, 0, 1).toISOString().split("T")[0])
-      .lte("start_date", new Date(currentYear, 11, 31).toISOString().split("T")[0])
+      .lte("start_date", yearEnd)
       .order("start_date", { ascending: true })
       .then((result) => {
         if (result.error) {
           console.error("Error fetching team requests:", result.error);
           return { data: [], error: null };
         }
-        return result;
+        // Filter to include only requests that overlap with the year
+        const filtered = (result.data || []).filter((req) => {
+          return req.start_date <= yearEnd && req.end_date >= yearStart;
+        });
+        return { data: filtered, error: null };
       }),
     // Get PTO policies for the organization
     supabase

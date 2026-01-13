@@ -57,6 +57,7 @@ export default async function TimesheetsPage() {
           .eq("organization_id", profile.organization_id)
           .eq("status", "submitted")
           .order("submitted_at", { ascending: false })
+          .limit(100)
       : Promise.resolve({ data: null }),
   ]);
 
