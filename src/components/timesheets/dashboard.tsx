@@ -2,8 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { format, parseISO, differenceInMinutes, isSameDay } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { format, parseISO, differenceInMinutes, isSameDay, startOfWeek, endOfWeek, subWeeks, addWeeks } from "date-fns";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +33,13 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   FileText,
@@ -44,6 +50,10 @@ import {
   Send,
   Calendar,
   AlertCircle,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
 } from "lucide-react";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -91,13 +101,14 @@ export function TimesheetsDashboard({
   currentWeekEnd,
 }: TimesheetsDashboardProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [selectedTimesheet, setSelectedTimesheet] =
     useState<PendingTimesheet | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Calculate work hours from time entries
   const calculatedHours = useMemo(() => {
@@ -159,46 +170,88 @@ export function TimesheetsDashboard({
     };
   }, [timeEntries]);
 
+  const handleGenerateTimesheet = async () => {
+    setIsGenerating(true);
+    try {
+      const response = await fetch("/api/timesheets/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          period_start: format(currentWeekStart, "yyyy-MM-dd"),
+          period_end: format(currentWeekEnd, "yyyy-MM-dd"),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to generate timesheet");
+      }
+
+      toast.success("Timesheet generated successfully");
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate timesheet");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handleSubmitTimesheet = async () => {
     setProcessingId("submit");
     try {
-      // Check if timesheet already exists for this period
-      const { data: existingTimesheet } = await supabase
-        .from("timesheets")
-        .select("id")
-        .eq("user_id", profile.id)
-        .eq("period_start", format(currentWeekStart, "yyyy-MM-dd"))
-        .single();
+      // First, generate or get the timesheet
+      let timesheetId: string | null = null;
 
-      if (existingTimesheet) {
-        // Update existing timesheet
-        const { error } = await supabase
-          .from("timesheets")
-          .update({
-            status: "submitted",
-            submitted_at: new Date().toISOString(),
-            total_hours: calculatedHours.totalRegular,
-            break_hours: calculatedHours.totalBreak,
-            overtime_hours: calculatedHours.overtimeHours,
-          })
-          .eq("id", existingTimesheet.id);
+      // Check if timesheet already exists
+      const checkResponse = await fetch(
+        `/api/timesheets?period_start=${format(currentWeekStart, "yyyy-MM-dd")}&period_end=${format(currentWeekEnd, "yyyy-MM-dd")}&user_id=${profile.id}`
+      );
+      const checkData = await checkResponse.json();
 
-        if (error) throw error;
+      if (checkData.data && checkData.data.length > 0) {
+        timesheetId = checkData.data[0].id;
       } else {
-        // Create new timesheet
-        const { error } = await supabase.from("timesheets").insert({
-          user_id: profile.id,
-          organization_id: profile.organization_id,
-          period_start: format(currentWeekStart, "yyyy-MM-dd"),
-          period_end: format(currentWeekEnd, "yyyy-MM-dd"),
-          status: "submitted",
-          submitted_at: new Date().toISOString(),
-          total_hours: calculatedHours.totalRegular,
-          break_hours: calculatedHours.totalBreak,
-          overtime_hours: calculatedHours.overtimeHours,
+        // Generate timesheet from time entries
+        const generateResponse = await fetch("/api/timesheets/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            period_start: format(currentWeekStart, "yyyy-MM-dd"),
+            period_end: format(currentWeekEnd, "yyyy-MM-dd"),
+          }),
         });
 
-        if (error) throw error;
+        const generateData = await generateResponse.json();
+
+        if (!generateResponse.ok) {
+          throw new Error(generateData.error || "Failed to generate timesheet");
+        }
+
+        timesheetId = generateData.data.id;
+      }
+
+      if (!timesheetId) {
+        throw new Error("Failed to create timesheet");
+      }
+
+      // Submit the timesheet
+      const submitResponse = await fetch(`/api/timesheets/${timesheetId}/submit`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      const submitData = await submitResponse.json();
+
+      if (!submitResponse.ok) {
+        throw new Error(submitData.error || "Failed to submit timesheet");
       }
 
       toast.success("Timesheet submitted for approval");
@@ -206,7 +259,7 @@ export function TimesheetsDashboard({
       router.refresh();
     } catch (error) {
       console.error(error);
-      toast.error("Failed to submit timesheet");
+      toast.error(error instanceof Error ? error.message : "Failed to submit timesheet");
     } finally {
       setProcessingId(null);
     }
@@ -215,17 +268,21 @@ export function TimesheetsDashboard({
   const handleApprove = async (timesheetId: string) => {
     setProcessingId(timesheetId);
     try {
-      const { error } = await supabase
-        .from("timesheets")
-        .update({
-          status: "approved",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
+      const response = await fetch(`/api/timesheets/${timesheetId}/approve`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
           review_comment: reviewComment || null,
-        })
-        .eq("id", timesheetId);
+        }),
+      });
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to approve timesheet");
+      }
 
       toast.success("Timesheet approved");
       setDetailDialogOpen(false);
@@ -234,7 +291,7 @@ export function TimesheetsDashboard({
       router.refresh();
     } catch (error) {
       console.error(error);
-      toast.error("Failed to approve timesheet");
+      toast.error(error instanceof Error ? error.message : "Failed to approve timesheet");
     } finally {
       setProcessingId(null);
     }
@@ -248,17 +305,21 @@ export function TimesheetsDashboard({
 
     setProcessingId(timesheetId);
     try {
-      const { error } = await supabase
-        .from("timesheets")
-        .update({
-          status: "rejected",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
+      const response = await fetch(`/api/timesheets/${timesheetId}/reject`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
           review_comment: reviewComment,
-        })
-        .eq("id", timesheetId);
+        }),
+      });
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to reject timesheet");
+      }
 
       toast.success("Timesheet rejected");
       setDetailDialogOpen(false);
@@ -267,9 +328,22 @@ export function TimesheetsDashboard({
       router.refresh();
     } catch (error) {
       console.error(error);
-      toast.error("Failed to reject timesheet");
+      toast.error(error instanceof Error ? error.message : "Failed to reject timesheet");
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      router.refresh();
+      toast.success("Data refreshed");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to refresh data");
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -295,14 +369,70 @@ export function TimesheetsDashboard({
       {/* Current Period Summary */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5" />
-            Current Period
-          </CardTitle>
-          <CardDescription>
-            {format(currentWeekStart, "MMM d")} -{" "}
-            {format(currentWeekEnd, "MMM d, yyyy")}
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="h-5 w-5" />
+                  Current Period
+                </CardTitle>
+                <CardDescription>
+                  {format(currentWeekStart, "MMM d")} -{" "}
+                  {format(currentWeekEnd, "MMM d, yyyy")}
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const prevWeek = subWeeks(currentWeekStart, 1);
+                    const prevWeekEnd = endOfWeek(prevWeek, { weekStartsOn: 0 });
+                    router.push(`/timesheets?period_start=${format(prevWeek, "yyyy-MM-dd")}&period_end=${format(prevWeekEnd, "yyyy-MM-dd")}`);
+                    router.refresh();
+                  }}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const now = new Date();
+                    const weekStart = startOfWeek(now, { weekStartsOn: 0 });
+                    const weekEnd = endOfWeek(now, { weekStartsOn: 0 });
+                    router.push(`/timesheets?period_start=${format(weekStart, "yyyy-MM-dd")}&period_end=${format(weekEnd, "yyyy-MM-dd")}`);
+                    router.refresh();
+                  }}
+                >
+                  Today
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const nextWeek = addWeeks(currentWeekStart, 1);
+                    const nextWeekEnd = endOfWeek(nextWeek, { weekStartsOn: 0 });
+                    router.push(`/timesheets?period_start=${format(nextWeek, "yyyy-MM-dd")}&period_end=${format(nextWeekEnd, "yyyy-MM-dd")}`);
+                    router.refresh();
+                  }}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-4">
@@ -324,8 +454,23 @@ export function TimesheetsDashboard({
                 {formatHours(calculatedHours.overtimeHours)}
               </div>
             </div>
-            <div className="flex items-end justify-end">
-              <Button onClick={() => setSubmitDialogOpen(true)}>
+            <div className="flex items-end justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={handleGenerateTimesheet}
+                disabled={isGenerating || calculatedHours.totalRegular === 0}
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-2" />
+                )}
+                Generate
+              </Button>
+              <Button
+                onClick={() => setSubmitDialogOpen(true)}
+                disabled={calculatedHours.totalRegular === 0}
+              >
                 <Send className="h-4 w-4 mr-2" />
                 Submit Timesheet
               </Button>
