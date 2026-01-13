@@ -3,6 +3,7 @@ import { getAuthData, getCachedSupabase } from "@/lib/auth";
 import type { Database } from "@/types/database.types";
 
 type PTOPolicyUpdate = Database["public"]["Tables"]["pto_policies"]["Update"];
+type PTOPolicyInsert = Database["public"]["Tables"]["pto_policies"]["Insert"];
 
 /**
  * GET /api/pto/policies
@@ -41,6 +42,54 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: true, data: policies || [] });
   } catch (error) {
     console.error("Error in GET /api/pto/policies:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/pto/policies
+ * Create a new PTO policy (admin only)
+ */
+export async function POST(request: Request) {
+  try {
+    const authData = await getAuthData();
+    if (!authData) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { profile } = authData;
+
+    // Check if user is admin
+    const isAdmin = profile.role === "admin" || profile.role === "owner";
+    if (!isAdmin) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const body = await request.json();
+    const policyData: PTOPolicyInsert = {
+      ...body,
+      organization_id: profile.organization_id,
+    };
+
+    const supabase = await getCachedSupabase();
+
+    const { data: policy, error } = await supabase
+      .from("pto_policies")
+      .insert(policyData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating PTO policy:", error);
+      return NextResponse.json(
+        { error: "Failed to create policy", details: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true, data: policy });
+  } catch (error) {
+    console.error("Error in POST /api/pto/policies:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

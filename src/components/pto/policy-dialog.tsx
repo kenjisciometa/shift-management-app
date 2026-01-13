@@ -123,9 +123,19 @@ export function PTOPolicyDialog({
         if (error) throw error;
         toast.success("Policy updated");
       } else {
-        const { error } = await supabase.from("pto_policies").insert(data);
+        const response = await fetch("/api/pto/policies", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        });
 
-        if (error) throw error;
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to create policy");
+        }
+
         toast.success("Policy created");
       }
 
