@@ -317,7 +317,7 @@ export function ShiftDialog({
         const startDateTime = setMinutes(setHours(baseDate, startHour), startMinute);
         const endDateTime = setMinutes(setHours(baseDate, endHour), endMinute);
 
-        const shiftData = {
+        const shiftData: any = {
           organization_id: organizationId,
           user_id: formData.userId,
           start_time: startDateTime.toISOString(),
@@ -325,7 +325,6 @@ export function ShiftDialog({
           break_minutes: formData.breakMinutes,
           location_id: formData.locationId || null,
           department_id: formData.departmentId || null,
-          position_id: formData.positionId || null,
           position: selectedPosition?.name || null,
           notes: formData.notes || null,
           color: positionColor,
@@ -333,6 +332,10 @@ export function ShiftDialog({
           status: formData.isPublished ? "published" : "draft",
           published_at: formData.isPublished ? new Date().toISOString() : null,
         };
+        // Only include position_id if it has a value (column may not exist in schema)
+        if (formData.positionId) {
+          shiftData.position_id = formData.positionId;
+        }
 
         const { error } = await supabase
           .from("shifts")
@@ -348,7 +351,7 @@ export function ShiftDialog({
           const startDateTime = setMinutes(setHours(date, startHour), startMinute);
           const endDateTime = setMinutes(setHours(date, endHour), endMinute);
 
-          return {
+          const shiftData: any = {
             organization_id: organizationId,
             user_id: formData.userId,
             start_time: startDateTime.toISOString(),
@@ -356,7 +359,6 @@ export function ShiftDialog({
             break_minutes: formData.breakMinutes,
             location_id: formData.locationId || null,
             department_id: formData.departmentId || null,
-            position_id: formData.positionId || null,
             position: selectedPosition?.name || null,
             notes: formData.notes || null,
             color: positionColor,
@@ -364,6 +366,11 @@ export function ShiftDialog({
             status: formData.isPublished ? "published" : "draft",
             published_at: formData.isPublished ? new Date().toISOString() : null,
           };
+          // Only include position_id if it has a value (column may not exist in schema)
+          if (formData.positionId) {
+            shiftData.position_id = formData.positionId;
+          }
+          return shiftData;
         });
 
         const { error } = await supabase.from("shifts").insert(shiftsToCreate);
