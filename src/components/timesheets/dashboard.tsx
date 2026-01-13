@@ -533,7 +533,11 @@ export function TimesheetsDashboard({
           {timesheets.length > 0 ? (
             <div className="space-y-4">
               {timesheets.map((timesheet) => (
-                <Card key={timesheet.id}>
+                <Card
+                  key={timesheet.id}
+                  className="cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => router.push(`/timesheets/${timesheet.id}`)}
+                >
                   <CardContent className="flex items-center justify-between p-4">
                     <div className="flex items-center gap-4">
                       <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center">
@@ -628,7 +632,18 @@ export function TimesheetsDashboard({
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/timesheets/${timesheet.id}`);
+                          }}
+                        >
+                          View Details
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setSelectedTimesheet(timesheet);
                             setDetailDialogOpen(true);
                           }}
