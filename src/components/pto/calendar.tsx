@@ -70,10 +70,17 @@ const ptoTypeLabels: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  approved: "bg-green-100 text-green-800 border-green-200",
-  rejected: "bg-red-100 text-red-800 border-red-200",
-  cancelled: "bg-gray-100 text-gray-800 border-gray-200",
+  pending: "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300",
+  approved: "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300",
+  rejected: "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300",
+  cancelled: "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-900/30 dark:text-gray-300",
+};
+
+const statusBorders: Record<string, string> = {
+  pending: "border-l-4 border-yellow-500",
+  approved: "border-l-4 border-green-500",
+  rejected: "border-l-4 border-red-500",
+  cancelled: "border-l-4 border-gray-500",
 };
 
 export function PTOCalendar({ requests, isTeamView = false }: PTOCalendarProps) {
@@ -143,13 +150,27 @@ export function PTOCalendar({ requests, isTeamView = false }: PTOCalendarProps) 
         </div>
 
         {/* Legend */}
-        <div className="flex items-center gap-4 text-sm">
-          {Object.entries(ptoTypeLabels).map(([type, label]) => (
-            <div key={type} className="flex items-center gap-1">
-              <div className={cn("w-3 h-3 rounded-full", ptoTypeColors[type])} />
-              <span className="text-muted-foreground">{label}</span>
+        <div className="flex items-center gap-4 text-sm flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground font-medium">PTO Types:</span>
+            {Object.entries(ptoTypeLabels).map(([type, label]) => (
+              <div key={type} className="flex items-center gap-1">
+                <div className={cn("w-3 h-3 rounded-full", ptoTypeColors[type])} />
+                <span className="text-muted-foreground">{label}</span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground font-medium">Status:</span>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-green-300" />
+              <span className="text-muted-foreground">Approved</span>
             </div>
-          ))}
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-yellow-300" />
+              <span className="text-muted-foreground">Pending</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -196,31 +217,48 @@ export function PTOCalendar({ requests, isTeamView = false }: PTOCalendarProps) 
 
                 {/* PTO requests */}
                 <div className="space-y-1">
-                  {dayRequests.slice(0, 3).map((request) => (
-                    <Popover key={request.id}>
-                      <PopoverTrigger asChild>
-                        <button
-                          className={cn(
-                            "w-full text-left text-xs p-1 rounded truncate flex items-center gap-1",
-                            ptoTypeColors[request.pto_type],
-                            "text-white hover:opacity-80 transition-opacity"
-                          )}
-                        >
-                          {isTeamView && request.profiles && (
-                            <Avatar className="h-4 w-4">
-                              <AvatarImage src={request.profiles.avatar_url || undefined} />
-                              <AvatarFallback className="text-[8px] bg-white/20">
-                                {getInitials(request.profiles)}
-                              </AvatarFallback>
-                            </Avatar>
-                          )}
-                          <span className="truncate">
-                            {isTeamView
-                              ? getDisplayName(request.profiles)
-                              : ptoTypeLabels[request.pto_type]}
-                          </span>
-                        </button>
-                      </PopoverTrigger>
+                  {dayRequests.slice(0, 3).map((request) => {
+                    const isStartDay = isSameDay(parseISO(request.start_date), day);
+                    const isEndDay = isSameDay(parseISO(request.end_date), day);
+                    const isSingleDay = isSameDay(parseISO(request.start_date), parseISO(request.end_date));
+
+                    return (
+                      <Popover key={request.id}>
+                        <PopoverTrigger asChild>
+                          <button
+                            className={cn(
+                              "w-full text-left text-xs p-1 rounded truncate flex items-center gap-1 relative",
+                              ptoTypeColors[request.pto_type],
+                              "text-white hover:opacity-80 transition-opacity",
+                              statusBorders[request.status || "pending"]
+                            )}
+                          >
+                            {isTeamView && request.profiles && (
+                              <Avatar className="h-4 w-4">
+                                <AvatarImage src={request.profiles.avatar_url || undefined} />
+                                <AvatarFallback className="text-[8px] bg-white/20">
+                                  {getInitials(request.profiles)}
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
+                            <span className="truncate flex-1">
+                              {isTeamView
+                                ? getDisplayName(request.profiles)
+                                : ptoTypeLabels[request.pto_type]}
+                            </span>
+                            {/* Status indicator dot */}
+                            <span
+                              className={cn(
+                                "w-1.5 h-1.5 rounded-full flex-shrink-0",
+                                request.status === "approved"
+                                  ? "bg-green-300"
+                                  : request.status === "pending"
+                                    ? "bg-yellow-300"
+                                    : "bg-gray-300"
+                              )}
+                            />
+                          </button>
+                        </PopoverTrigger>
                       <PopoverContent className="w-80 p-4">
                         <div className="space-y-3">
                           <div className="flex items-start gap-3">
@@ -290,11 +328,54 @@ export function PTOCalendar({ requests, isTeamView = false }: PTOCalendarProps) 
                         </div>
                       </PopoverContent>
                     </Popover>
-                  ))}
+                    );
+                  })}
                   {dayRequests.length > 3 && (
-                    <div className="text-xs text-muted-foreground text-center">
-                      +{dayRequests.length - 3} more
-                    </div>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button className="w-full text-xs text-muted-foreground text-center hover:text-foreground transition-colors">
+                          +{dayRequests.length - 3} more
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 p-4">
+                        <div className="space-y-2">
+                          <div className="font-medium mb-2">All PTO Requests</div>
+                          {dayRequests.slice(3).map((request) => (
+                            <div
+                              key={request.id}
+                              className="flex items-center gap-2 p-2 rounded border"
+                            >
+                              <div
+                                className={cn(
+                                  "w-3 h-3 rounded-full",
+                                  ptoTypeColors[request.pto_type]
+                                )}
+                              />
+                              <div className="flex-1">
+                                <div className="text-sm font-medium">
+                                  {isTeamView
+                                    ? getDisplayName(request.profiles)
+                                    : ptoTypeLabels[request.pto_type]}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  {format(parseISO(request.start_date), "MMM d")} -{" "}
+                                  {format(parseISO(request.end_date), "MMM d")}
+                                </div>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "capitalize text-xs",
+                                  statusColors[request.status || "pending"]
+                                )}
+                              >
+                                {request.status || "pending"}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   )}
                 </div>
               </div>

@@ -50,7 +50,7 @@ export default async function SchedulePage({
   const supabase = await getCachedSupabase();
 
   // Parallel fetch all data
-  const [shiftsResult, teamMembersResult, locationsResult, departmentsResult, positionsResult] = await Promise.all([
+  const [shiftsResult, teamMembersResult, locationsResult, departmentsResult, positionsResult, ptoRequestsResult] = await Promise.all([
     // Get shifts for the date range
     (async () => {
       const query = supabase
@@ -98,6 +98,18 @@ export default async function SchedulePage({
       .eq("organization_id", profile.organization_id)
       .eq("is_active", true)
       .order("sort_order"),
+    // Get PTO requests for the date range (approved and pending only)
+    supabase
+      .from("pto_requests")
+      .select(`
+        *,
+        profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
+      `)
+      .eq("organization_id", profile.organization_id)
+      .in("status", ["approved", "pending"])
+      .gte("end_date", startDate.toISOString().split("T")[0])
+      .lte("start_date", endDate.toISOString().split("T")[0])
+      .order("start_date", { ascending: true }),
   ]);
 
   return (
@@ -110,6 +122,7 @@ export default async function SchedulePage({
           locations={locationsResult.data || []}
           departments={departmentsResult.data || []}
           positions={positionsResult.data || []}
+          ptoRequests={ptoRequestsResult.data || []}
           currentDate={currentDate}
           view={view}
           isAdmin={isAdmin}
