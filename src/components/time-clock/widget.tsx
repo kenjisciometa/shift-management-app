@@ -107,6 +107,18 @@ export function TimeClockWidget({
     getPosition();
   }, [getPosition]);
 
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'time-clock/widget.tsx:108',message:'Component state - locations and selectedLocationId',data:{locationsCount:locations.length,locations:locations.map(l=>({id:l.id,name:l.name})),selectedLocationId,initialSelectedLocationId:locations.length===1?locations[0]?.id:'',todayEntriesCount:todayEntries.length,status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  }, [locations, selectedLocationId, todayEntries, status]);
+  // #endregion
+
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'time-clock/widget.tsx:108',message:'Geolocation state update',data:{geoLoading,geoError,hasPosition:!!position,positionAccuracy:position?.accuracy,positionLat:position?.latitude,positionLng:position?.longitude},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+  }, [geoLoading, geoError, position]);
+  // #endregion
+
   const selectedLocation = locations.find((l) => l.id === selectedLocationId);
 
   // Check if user is within geofence
@@ -137,7 +149,8 @@ export function TimeClockWidget({
   })();
 
   const createTimeEntry = async (entryType: string) => {
-    if (!selectedLocationId && entryType === "clock_in") {
+    // Only require location selection if locations are available
+    if (!selectedLocationId && entryType === "clock_in" && locations.length > 0) {
       toast.error("Please select a location");
       return;
     }
@@ -302,7 +315,7 @@ export function TimeClockWidget({
             </div>
           )}
 
-          {/* Location Selection */}
+          {/* Location Selection - Only show when there are multiple locations */}
           {status === "clocked_out" && locations.length > 1 && (
             <div className="space-y-2">
               <label className="text-sm font-medium">Work Location</label>
@@ -390,12 +403,21 @@ export function TimeClockWidget({
           {/* Action Buttons */}
           <div className="space-y-2 pt-4">
             {status === "clocked_out" && (
-              <Button
-                className="w-full"
-                size="lg"
-                onClick={() => createTimeEntry("clock_in")}
-                disabled={loading || geoLoading || !selectedLocationId}
-              >
+              <>
+                {/* #region agent log */}
+                {(() => {
+                  // Allow clock in when no locations exist, otherwise require location selection
+                  const isDisabled = loading || geoLoading || (locations.length > 0 && !selectedLocationId);
+                  fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'time-clock/widget.tsx:397',message:'Clock In button disabled state',data:{status,isDisabled,loading,geoLoading,selectedLocationId,hasSelectedLocation:!!selectedLocationId,locationsCount:locations.length,locationsIds:locations.map(l=>l.id),isButtonShown:status==='clocked_out'},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+                  return null;
+                })()}
+                {/* #endregion */}
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={() => createTimeEntry("clock_in")}
+                  disabled={loading || geoLoading || (locations.length > 0 && !selectedLocationId)}
+                >
                 {loading ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
@@ -403,6 +425,7 @@ export function TimeClockWidget({
                 )}
                 Clock In
               </Button>
+              </>
             )}
 
             {status === "clocked_in" && (
