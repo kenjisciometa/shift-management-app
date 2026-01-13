@@ -48,9 +48,11 @@ import {
   List,
   Filter,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { PTORequestDialog } from "./request-dialog";
 import { PTOCalendar } from "./calendar";
+import { PTOBalanceInitializeDialog } from "./balance-initialize-dialog";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type PTOBalance = Database["public"]["Tables"]["pto_balances"]["Row"] & {
@@ -123,6 +125,7 @@ export function PTODashboard({
   const [reviewAction, setReviewAction] = useState<"approve" | "reject" | null>(null);
   const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const [initializeDialogOpen, setInitializeDialogOpen] = useState(false);
 
   // Filter state
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -324,9 +327,29 @@ export function PTODashboard({
             <CardContent className="flex flex-col items-center justify-center py-10">
               <Palmtree className="h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground">No PTO balances configured</p>
-              <p className="text-sm text-muted-foreground">
-                Contact your administrator to set up PTO policies
-              </p>
+              {isAdmin ? (
+                <>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    {policies.filter((p) => p.is_active).length > 0
+                      ? "Initialize balances for users based on active policies"
+                      : "Create PTO policies first, then initialize balances"}
+                  </p>
+                  {policies.filter((p) => p.is_active).length > 0 ? (
+                    <Button onClick={() => setInitializeDialogOpen(true)}>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Initialize Balances
+                    </Button>
+                  ) : (
+                    <Button variant="outline" onClick={() => router.push("/organization")}>
+                      Go to Organization Settings
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Contact your administrator to set up PTO policies
+                </p>
+              )}
             </CardContent>
           </Card>
         )}
@@ -669,6 +692,18 @@ export function PTODashboard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Balance Initialize Dialog */}
+      <PTOBalanceInitializeDialog
+        open={initializeDialogOpen}
+        onOpenChange={setInitializeDialogOpen}
+        organizationId={profile.organization_id}
+        policies={policies}
+        onSuccess={() => {
+          fetchData();
+          router.refresh();
+        }}
+      />
     </div>
   );
 }

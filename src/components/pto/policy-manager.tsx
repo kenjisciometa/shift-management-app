@@ -39,8 +39,10 @@ import {
   Clock,
   Users,
   Shield,
+  Sparkles,
 } from "lucide-react";
 import { PTOPolicyDialog } from "./policy-dialog";
+import { PTOBalanceInitializeDialog } from "./balance-initialize-dialog";
 
 type PTOPolicy = Database["public"]["Tables"]["pto_policies"]["Row"];
 
@@ -85,6 +87,7 @@ export function PTOPolicyManager({
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [policyToDelete, setPolicyToDelete] = useState<PTOPolicy | null>(null);
+  const [initializeDialogOpen, setInitializeDialogOpen] = useState(false);
 
   const handleEdit = (policy: PTOPolicy) => {
     setSelectedPolicy(policy);
@@ -149,10 +152,18 @@ export function PTOPolicyManager({
             Configure time off policies for your organization
           </p>
         </div>
-        <Button onClick={handleAdd}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Policy
-        </Button>
+        <div className="flex items-center gap-2">
+          {policies.filter((p) => p.is_active).length > 0 && (
+            <Button variant="outline" onClick={() => setInitializeDialogOpen(true)}>
+              <Sparkles className="h-4 w-4 mr-2" />
+              Initialize Balances
+            </Button>
+          )}
+          <Button onClick={handleAdd}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Policy
+          </Button>
+        </div>
       </div>
 
       {policies.length > 0 ? (
@@ -328,6 +339,15 @@ export function PTOPolicyManager({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Balance Initialize Dialog */}
+      <PTOBalanceInitializeDialog
+        open={initializeDialogOpen}
+        onOpenChange={setInitializeDialogOpen}
+        organizationId={organizationId}
+        policies={policies}
+        onSuccess={() => router.refresh()}
+      />
     </div>
   );
 }
