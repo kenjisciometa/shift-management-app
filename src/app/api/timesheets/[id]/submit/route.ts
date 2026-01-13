@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import {
+  createTimesheetNotification,
+  createTimesheetSubmittedAdminNotification,
+} from "@/lib/notifications";
 
 /**
  * PUT /api/timesheets/[id]/submit
@@ -71,8 +75,42 @@ export async function PUT(
       return NextResponse.json({ error: "Failed to submit timesheet" }, { status: 500 });
     }
 
-    // TODO: Create notification for managers/admins
-    // await createNotification(...)
+    // Create notification for the employee
+    await createTimesheetNotification(supabase, {
+      userId: user.id,
+      organizationId: profile.organization_id,
+      type: "submitted",
+      timesheetId: id,
+      periodStart: existingTimesheet.period_start,
+      periodEnd: existingTimesheet.period_end,
+    });
+
+    // Get all admins/managers to notify them
+    const { data: admins } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name, display_name")
+      .eq("organization_id", profile.organization_id)
+      .in("role", ["admin", "owner", "manager"]);
+
+    if (admins) {
+      const employeeName =
+        updatedTimesheet.profiles?.display_name ||
+        `${updatedTimesheet.profiles?.first_name} ${updatedTimesheet.profiles?.last_name}`;
+
+      // Notify all admins/managers
+      await Promise.all(
+        admins.map((admin) =>
+          createTimesheetSubmittedAdminNotification(supabase, {
+            adminUserId: admin.id,
+            organizationId: profile.organization_id,
+            employeeName,
+            timesheetId: id,
+            periodStart: existingTimesheet.period_start,
+            periodEnd: existingTimesheet.period_end,
+          })
+        )
+      );
+    }
 
     return NextResponse.json({ success: true, data: updatedTimesheet });
   } catch (error) {

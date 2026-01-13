@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { createTimesheetNotification } from "@/lib/notifications";
 
 /**
  * PUT /api/timesheets/[id]/approve
@@ -69,8 +70,21 @@ export async function PUT(
       return NextResponse.json({ error: "Failed to approve timesheet" }, { status: 500 });
     }
 
-    // TODO: Create notification for the user
-    // await createNotification(...)
+    // Create notification for the employee
+    const reviewerName =
+      updatedTimesheet.profiles_timesheets_reviewed_by_fkey?.display_name ||
+      `${updatedTimesheet.profiles_timesheets_reviewed_by_fkey?.first_name} ${updatedTimesheet.profiles_timesheets_reviewed_by_fkey?.last_name}`;
+
+    await createTimesheetNotification(supabase, {
+      userId: existingTimesheet.user_id,
+      organizationId: profile.organization_id,
+      type: "approved",
+      timesheetId: id,
+      periodStart: existingTimesheet.period_start,
+      periodEnd: existingTimesheet.period_end,
+      reviewerName,
+      comment: reviewComment,
+    });
 
     return NextResponse.json({ success: true, data: updatedTimesheet });
   } catch (error) {

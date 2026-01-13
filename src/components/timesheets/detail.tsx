@@ -31,7 +31,15 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  Download,
 } from "lucide-react";
+import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Timesheet = Database["public"]["Tables"]["timesheets"]["Row"] & {
@@ -189,6 +197,126 @@ export function TimesheetDetail({
     window.print();
   };
 
+  const exportToCSV = () => {
+    const headers = [
+      "Date",
+      "Day",
+      "Location",
+      "Clock In",
+      "Clock Out",
+      "Work Hours",
+      "Break Hours",
+      "Number of Breaks",
+    ];
+
+    const rows = dailyBreakdown.map((day) => [
+      format(day.date, "yyyy-MM-dd"),
+      format(day.date, "EEEE"),
+      day.location || "N/A",
+      day.clockIn ? formatTime(day.clockIn) : "N/A",
+      day.clockOut ? formatTime(day.clockOut) : "N/A",
+      formatHours(day.totalWorkMinutes / 60),
+      formatHours(day.totalBreakMinutes / 60),
+      String(day.breaks.length),
+    ]);
+
+    // Add summary rows
+    rows.push([]);
+    rows.push(["Summary"]);
+    rows.push([
+      "Employee",
+      getDisplayName(timesheet.profiles),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    rows.push([
+      "Period",
+      `${format(parseISO(timesheet.period_start), "MMM d")} - ${format(parseISO(timesheet.period_end), "MMM d, yyyy")}`,
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    rows.push([
+      "Total Hours",
+      formatHours(Number(timesheet.total_hours || 0)),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    rows.push([
+      "Break Hours",
+      formatHours(Number(timesheet.break_hours || 0)),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    rows.push([
+      "Overtime Hours",
+      formatHours(Number(timesheet.overtime_hours || 0)),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    rows.push(["Status", timesheet.status || "N/A", "", "", "", "", "", ""]);
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute(
+      "download",
+      `timesheet-${format(parseISO(timesheet.period_start), "yyyy-MM-dd")}-${format(parseISO(timesheet.period_end), "yyyy-MM-dd")}.csv`
+    );
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast.success("Timesheet exported to CSV");
+  };
+
+  const exportToPDF = async () => {
+    try {
+      // Open PDF in new window for printing/saving
+      const pdfWindow = window.open(
+        `/api/timesheets/${timesheet.id}/export?format=pdf`,
+        "_blank"
+      );
+      
+      if (!pdfWindow) {
+        toast.error("Please allow popups to export PDF");
+        return;
+      }
+
+      toast.success("Opening PDF...");
+    } catch (error) {
+      console.error("Error exporting PDF:", error);
+      toast.error("Failed to export PDF. Please try again.");
+    }
+  };
+
   const StatusIcon = statusIcons[timesheet.status || "draft"] || AlertCircle;
 
   return (
@@ -204,10 +332,28 @@ export function TimesheetDetail({
           Back to Timesheets
         </Button>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={handlePrint} className="gap-2">
-            <Printer className="h-4 w-4" />
-            Print
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="gap-2">
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={exportToCSV}>
+                <FileText className="h-4 w-4 mr-2" />
+                Export as CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={exportToPDF}>
+                <FileText className="h-4 w-4 mr-2" />
+                Export as PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handlePrint}>
+                <Printer className="h-4 w-4 mr-2" />
+                Print
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

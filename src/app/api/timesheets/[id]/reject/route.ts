@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { createTimesheetNotification } from "@/lib/notifications";
 
 /**
  * PUT /api/timesheets/[id]/reject
@@ -47,6 +48,20 @@ export async function PUT(
       );
     }
 
+    if (!reviewComment || reviewComment.trim() === "") {
+      return NextResponse.json(
+        { error: "Review comment is required for rejection" },
+        { status: 400 }
+      );
+    }
+
+    // Get reviewer name before update
+    const { data: reviewerProfile } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name, display_name")
+      .eq("id", user.id)
+      .single();
+
     // Update the timesheet status (rejected timesheets can be edited and resubmitted)
     const { data: updatedTimesheet, error: updateError } = await supabase
       .from("timesheets")
@@ -69,8 +84,21 @@ export async function PUT(
       return NextResponse.json({ error: "Failed to reject timesheet" }, { status: 500 });
     }
 
-    // TODO: Create notification for the user
-    // await createNotification(...)
+    // Create notification for the employee
+    const reviewerName =
+      reviewerProfile?.display_name ||
+      `${reviewerProfile?.first_name} ${reviewerProfile?.last_name}`;
+
+    await createTimesheetNotification(supabase, {
+      userId: existingTimesheet.user_id,
+      organizationId: profile.organization_id,
+      type: "rejected",
+      timesheetId: id,
+      periodStart: existingTimesheet.period_start,
+      periodEnd: existingTimesheet.period_end,
+      reviewerName,
+      comment: reviewComment,
+    });
 
     return NextResponse.json({ success: true, data: updatedTimesheet });
   } catch (error) {
