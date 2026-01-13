@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, differenceInBusinessDays, addDays } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,7 +62,6 @@ export function PTORequestDialog({
   policies,
 }: PTORequestDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -126,18 +124,24 @@ export function PTORequestDialog({
     setLoading(true);
 
     try {
-      const { error } = await supabase.from("pto_requests").insert({
-        organization_id: profile.organization_id,
-        user_id: profile.id,
-        pto_type: formData.ptoType,
-        start_date: formData.startDate,
-        end_date: formData.endDate,
-        total_days: totalDays,
-        reason: formData.reason || null,
-        status: "pending",
+      const response = await fetch("/api/pto/requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          start_date: formData.startDate,
+          end_date: formData.endDate,
+          pto_type: formData.ptoType,
+          reason: formData.reason || null,
+        }),
       });
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to submit request");
+      }
 
       toast.success("Time off request submitted");
       onOpenChange(false);
@@ -152,7 +156,7 @@ export function PTORequestDialog({
       });
     } catch (error) {
       console.error(error);
-      toast.error("Failed to submit request");
+      toast.error(error instanceof Error ? error.message : "Failed to submit request");
     } finally {
       setLoading(false);
     }
