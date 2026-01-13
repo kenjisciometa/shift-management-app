@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { TimesheetsDashboard } from "@/components/timesheets/dashboard";
 import {
@@ -34,18 +33,19 @@ export default async function TimesheetsPage({
     : endOfWeek(now, { weekStartsOn: 0 });
   const lastWeekStart = startOfWeek(subWeeks(now, 1), { weekStartsOn: 0 });
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const cookieHeader = cookies().toString();
   const supabase = await getCachedSupabase();
 
-  // Fetch data using API routes for timesheets, direct Supabase for time entries
-  const [timesheetsResponse, timeEntriesResult, pendingTimesheetsResponse] = await Promise.all([
-    // Get user's timesheets using API route
-    fetch(
-      `${baseUrl}/api/timesheets?user_id=${user.id}&limit=10`,
-      { headers: { Cookie: cookieHeader } }
-    ).then((res) => res.json()).catch(() => ({ data: [] })),
-    // Get time entries for the current period (direct Supabase since no API route exists yet)
+  // Fetch data directly from Supabase instead of API routes for better performance
+  const [timesheetsResult, timeEntriesResult, pendingTimesheetsResult] = await Promise.all([
+    // Get user's timesheets directly from Supabase
+    supabase
+      .from("timesheets")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("organization_id", profile.organization_id)
+      .order("period_start", { ascending: false })
+      .limit(10),
+    // Get time entries for the current period
     supabase
       .from("time_entries")
       .select(`
@@ -53,16 +53,23 @@ export default async function TimesheetsPage({
         locations (id, name)
       `)
       .eq("user_id", user.id)
+      .eq("organization_id", profile.organization_id)
       .gte("timestamp", lastWeekStart.toISOString())
       .lte("timestamp", currentWeekEnd.toISOString())
       .order("timestamp", { ascending: true }),
-    // Get pending timesheets for admins using API route
+    // Get pending timesheets for admins
     isAdmin
-      ? fetch(
-          `${baseUrl}/api/timesheets?status=submitted&limit=100`,
-          { headers: { Cookie: cookieHeader } }
-        ).then((res) => res.json()).catch(() => ({ data: [] }))
-      : Promise.resolve({ data: [] }),
+      ? supabase
+          .from("timesheets")
+          .select(`
+            *,
+            profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
+          `)
+          .eq("organization_id", profile.organization_id)
+          .eq("status", "submitted")
+          .order("submitted_at", { ascending: false })
+          .limit(100)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   return (
@@ -71,9 +78,9 @@ export default async function TimesheetsPage({
       <div className="container mx-auto p-6">
         <TimesheetsDashboard
           profile={profile}
-          timesheets={timesheetsResponse.data || []}
+          timesheets={timesheetsResult.data || []}
           timeEntries={timeEntriesResult.data || []}
-          pendingTimesheets={pendingTimesheetsResponse.data || []}
+          pendingTimesheets={pendingTimesheetsResult.data || []}
           isAdmin={isAdmin}
           currentWeekStart={currentWeekStart}
           currentWeekEnd={currentWeekEnd}

@@ -168,7 +168,7 @@ export function TimesheetsDashboard({
       totalBreak,
       overtimeHours,
     };
-  }, [timeEntries]);
+  }, [timeEntries, currentWeekStart, currentWeekEnd]);
 
   const handleGenerateTimesheet = async () => {
     setIsGenerating(true);

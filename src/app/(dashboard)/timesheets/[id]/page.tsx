@@ -20,7 +20,9 @@ export default async function TimesheetDetailPage({
   const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const cookieHeader = cookies().toString();
+  const cookieStore = await cookies();
+  const allCookies = cookieStore.getAll();
+  const cookieHeader = allCookies.map(c => `${c.name}=${c.value}`).join('; ');
 
   // Fetch timesheet details using API route
   const timesheetResponse = await fetch(
