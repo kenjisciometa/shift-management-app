@@ -59,8 +59,8 @@ export async function PUT(
       .eq("id", id)
       .select(`
         *,
-        profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
-        profiles!pto_requests_reviewed_by_fkey (id, first_name, last_name, display_name)
+        user:profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
+        reviewer:profiles!pto_requests_reviewed_by_fkey (id, first_name, last_name, display_name)
       `)
       .single();
 

@@ -27,8 +27,8 @@ export async function GET(
       .from("pto_requests")
       .select(`
         *,
-        profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
-        profiles!pto_requests_reviewed_by_fkey (id, first_name, last_name, display_name)
+        user:profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
+        reviewer:profiles!pto_requests_reviewed_by_fkey (id, first_name, last_name, display_name)
       `)
       .eq("id", id)
       .eq("organization_id", profile.organization_id)
