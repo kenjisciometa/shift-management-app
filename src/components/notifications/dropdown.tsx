@@ -22,6 +22,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  FileText,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +42,10 @@ const notificationIcons: Record<string, React.ElementType> = {
   pto: Palmtree,
   approval: CheckCircle2,
   alert: AlertCircle,
+  timesheet_submitted: FileText,
+  timesheet_approved: CheckCircle2,
+  timesheet_rejected: XCircle,
+  timesheet_pending_approval: Clock,
 };
 
 export function NotificationDropdown({ profile }: NotificationDropdownProps) {
@@ -148,6 +154,16 @@ export function NotificationDropdown({ profile }: NotificationDropdownProps) {
           router.push(`/chat?room=${data.room_id}`);
         } else {
           router.push("/chat");
+        }
+        break;
+      case "timesheet_submitted":
+      case "timesheet_approved":
+      case "timesheet_rejected":
+      case "timesheet_pending_approval":
+        if (data?.timesheet_id) {
+          router.push(`/timesheets/${data.timesheet_id}`);
+        } else {
+          router.push("/timesheets");
         }
         break;
       default:

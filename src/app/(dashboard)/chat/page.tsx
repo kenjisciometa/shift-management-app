@@ -65,6 +65,10 @@ export default async function ChatPage() {
   }> = {};
 
   if (roomIds.length > 0) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat/page.tsx:67',message:'Starting chat queries',data:{roomIdsCount:roomIds.length,roomIds:roomIds.slice(0,5)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    const queryStartTime = Date.now();
     const [allParticipantsResult, latestMessagesResult] = await Promise.all([
       supabase
         .from("chat_participants")
@@ -90,6 +94,10 @@ export default async function ChatPage() {
         .eq("is_deleted", false)
         .order("created_at", { ascending: false }),
     ]);
+    // #region agent log
+    const queryDuration = Date.now() - queryStartTime;
+    fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'chat/page.tsx:92',message:'Chat queries completed',data:{queryDuration,participantsCount:allParticipantsResult.data?.length||0,messagesCount:latestMessagesResult.data?.length||0,hasError:!!latestMessagesResult.error},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
 
     // Group participants by room
     if (allParticipantsResult.data) {

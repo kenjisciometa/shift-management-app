@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { format, parseISO } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { format, parseISO, startOfYear, endOfYear } from "date-fns";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +16,24 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
   Palmtree,
@@ -29,9 +46,13 @@ import {
   AlertCircle,
   CalendarDays,
   List,
+  Filter,
+  RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { PTORequestDialog } from "./request-dialog";
 import { PTOCalendar } from "./calendar";
+import { PTOBalanceInitializeDialog } from "./balance-initialize-dialog";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type PTOBalance = Database["public"]["Tables"]["pto_balances"]["Row"] & {
@@ -63,6 +84,7 @@ interface PTODashboardProps {
   teamRequests: PendingRequest[];
   policies: PTOPolicy[];
   isAdmin: boolean;
+  selectedYear?: number;
 }
 
 const statusColors: Record<string, string> = {
@@ -83,65 +105,140 @@ const ptoTypeLabels: Record<string, string> = {
 
 export function PTODashboard({
   profile,
-  balances,
-  requests,
-  pendingRequests,
+  balances: initialBalances,
+  requests: initialRequests,
+  pendingRequests: initialPendingRequests,
   teamRequests,
   policies,
   isAdmin,
+  selectedYear = new Date().getFullYear(),
 }: PTODashboardProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [loading, setLoading] = useState(false);
+  const [balances, setBalances] = useState(initialBalances);
+  const [requests, setRequests] = useState(initialRequests);
+  const [pendingRequests, setPendingRequests] = useState(initialPendingRequests);
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [reviewAction, setReviewAction] = useState<"approve" | "reject" | null>(null);
+  const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
+  const [reviewComment, setReviewComment] = useState("");
+  const [initializeDialogOpen, setInitializeDialogOpen] = useState(false);
 
-  const handleApprove = async (requestId: string) => {
-    setProcessingId(requestId);
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dateRangeStart, setDateRangeStart] = useState<string>("");
+  const [dateRangeEnd, setDateRangeEnd] = useState<string>("");
+
+  // Fetch data from API
+  const fetchData = async () => {
+    setLoading(true);
     try {
-      const { error } = await supabase
-        .from("pto_requests")
-        .update({
-          status: "approved",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", requestId);
+      const params = new URLSearchParams();
+      if (statusFilter !== "all") {
+        params.set("status", statusFilter);
+      }
+      if (dateRangeStart) {
+        params.set("start_date", dateRangeStart);
+      }
+      if (dateRangeEnd) {
+        params.set("end_date", dateRangeEnd);
+      }
 
-      if (error) throw error;
+      // Fetch requests
+      const requestsResponse = await fetch(`/api/pto/requests?${params.toString()}`);
+      const requestsData = await requestsResponse.json();
+      if (requestsData.success) {
+        setRequests(requestsData.data || []);
+      }
 
-      toast.success("Request approved");
+      // Fetch balances for selected year
+      const balanceResponse = await fetch(`/api/pto/balance?year=${selectedYear}`);
+      const balanceData = await balanceResponse.json();
+      if (balanceData.success) {
+        setBalances(balanceData.data || []);
+      }
+
+      // Fetch pending requests (admin only)
+      if (isAdmin) {
+        const pendingResponse = await fetch("/api/pto/requests?status=pending");
+        const pendingData = await pendingResponse.json();
+        if (pendingData.success) {
+          setPendingRequests(pendingData.data || []);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching data:", error);
+      toast.error("Failed to refresh data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Filter requests based on status and date range
+  const filteredRequests = requests.filter((request) => {
+    if (statusFilter !== "all" && request.status !== statusFilter) {
+      return false;
+    }
+    if (dateRangeStart && request.end_date < dateRangeStart) {
+      return false;
+    }
+    if (dateRangeEnd && request.start_date > dateRangeEnd) {
+      return false;
+    }
+    return true;
+  });
+
+  const openReviewDialog = (requestId: string, action: "approve" | "reject") => {
+    setReviewRequestId(requestId);
+    setReviewAction(action);
+    setReviewComment("");
+    setReviewDialogOpen(true);
+  };
+
+  const handleReviewSubmit = async () => {
+    if (!reviewRequestId || !reviewAction) return;
+
+    setProcessingId(reviewRequestId);
+    setReviewDialogOpen(false);
+
+    try {
+      const response = await fetch(`/api/pto/requests/${reviewRequestId}/${reviewAction}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ review_comment: reviewComment || null }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `Failed to ${reviewAction} request`);
+      }
+
+      toast.success(`Request ${reviewAction}d`);
+      setReviewRequestId(null);
+      setReviewAction(null);
+      setReviewComment("");
+      fetchData();
       router.refresh();
     } catch (error) {
       console.error(error);
-      toast.error("Failed to approve request");
+      toast.error(error instanceof Error ? error.message : `Failed to ${reviewAction} request`);
     } finally {
       setProcessingId(null);
     }
   };
 
+  const handleApprove = async (requestId: string) => {
+    openReviewDialog(requestId, "approve");
+  };
+
   const handleReject = async (requestId: string) => {
-    setProcessingId(requestId);
-    try {
-      const { error } = await supabase
-        .from("pto_requests")
-        .update({
-          status: "rejected",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", requestId);
-
-      if (error) throw error;
-
-      toast.success("Request rejected");
-      router.refresh();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to reject request");
-    } finally {
-      setProcessingId(null);
-    }
+    openReviewDialog(requestId, "reject");
   };
 
   const getDisplayName = (p: PendingRequest["profiles"]) => {
@@ -155,8 +252,36 @@ export function PTODashboard({
     return `${p.first_name[0]}${p.last_name[0]}`.toUpperCase();
   };
 
+  const currentYear = new Date().getFullYear();
+  const availableYears = Array.from({ length: 3 }, (_, i) => currentYear - i);
+
   return (
     <div className="space-y-6">
+      {/* Year Selector */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="year-selector">View Year:</Label>
+          <Select
+            value={selectedYear.toString()}
+            onValueChange={(value) => {
+              const year = parseInt(value);
+              router.push(`/pto?year=${year}`);
+            }}
+          >
+            <SelectTrigger id="year-selector" className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {availableYears.map((year) => (
+                <SelectItem key={year} value={year.toString()}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
       {/* Balance Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {balances.length > 0 ? (
@@ -202,16 +327,36 @@ export function PTODashboard({
             <CardContent className="flex flex-col items-center justify-center py-10">
               <Palmtree className="h-12 w-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground">No PTO balances configured</p>
-              <p className="text-sm text-muted-foreground">
-                Contact your administrator to set up PTO policies
-              </p>
+              {isAdmin ? (
+                <>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    {policies.filter((p) => p.is_active).length > 0
+                      ? "Initialize balances for users based on active policies"
+                      : "Create PTO policies first, then initialize balances"}
+                  </p>
+                  {policies.filter((p) => p.is_active).length > 0 ? (
+                    <Button onClick={() => setInitializeDialogOpen(true)}>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Initialize Balances
+                    </Button>
+                  ) : (
+                    <Button variant="outline" onClick={() => router.push("/organization")}>
+                      Go to Organization Settings
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Contact your administrator to set up PTO policies
+                </p>
+              )}
             </CardContent>
           </Card>
         )}
       </div>
 
       {/* View Toggle and Request Button */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-2">
           <Button
             variant={viewMode === "list" ? "default" : "outline"}
@@ -229,12 +374,86 @@ export function PTODashboard({
             <CalendarDays className="h-4 w-4 mr-2" />
             Calendar
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchData}
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
         </div>
         <Button onClick={() => setDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Request Time Off
         </Button>
       </div>
+
+      {/* Filters (List View Only) */}
+      {viewMode === "list" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Filter className="h-4 w-4" />
+              Filters
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="status-filter">Status</Label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger id="status-filter">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="date-start">Start Date</Label>
+                <Input
+                  id="date-start"
+                  type="date"
+                  value={dateRangeStart}
+                  onChange={(e) => setDateRangeStart(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="date-end">End Date</Label>
+                <Input
+                  id="date-end"
+                  type="date"
+                  value={dateRangeEnd}
+                  onChange={(e) => setDateRangeEnd(e.target.value)}
+                  min={dateRangeStart}
+                />
+              </div>
+            </div>
+            {(statusFilter !== "all" || dateRangeStart || dateRangeEnd) && (
+              <div className="mt-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setStatusFilter("all");
+                    setDateRangeStart("");
+                    setDateRangeEnd("");
+                  }}
+                >
+                  Clear Filters
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Calendar View */}
       {viewMode === "calendar" ? (
@@ -270,9 +489,9 @@ export function PTODashboard({
         </TabsList>
 
         <TabsContent value="my-requests" className="mt-4">
-          {requests.length > 0 ? (
+          {filteredRequests.length > 0 ? (
             <div className="space-y-4">
-              {requests.map((request) => (
+              {filteredRequests.map((request) => (
                 <Card key={request.id}>
                   <CardContent className="flex items-center justify-between p-4">
                     <div className="flex items-center gap-4">
@@ -313,10 +532,16 @@ export function PTODashboard({
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-10">
                 <Clock className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No time off requests</p>
-                <Button variant="link" onClick={() => setDialogOpen(true)}>
-                  Request time off
-                </Button>
+                <p className="text-muted-foreground">
+                  {requests.length === 0
+                    ? "No time off requests"
+                    : "No requests match the current filters"}
+                </p>
+                {requests.length === 0 && (
+                  <Button variant="link" onClick={() => setDialogOpen(true)}>
+                    Request time off
+                  </Button>
+                )}
               </CardContent>
             </Card>
           )}
@@ -400,10 +625,84 @@ export function PTODashboard({
       {/* Request Dialog */}
       <PTORequestDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) {
+            // Refresh data when dialog closes
+            fetchData();
+          }
+        }}
         profile={profile}
         balances={balances}
         policies={policies}
+      />
+
+      {/* Review Dialog */}
+      <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {reviewAction === "approve" ? "Approve" : "Reject"} PTO Request
+            </DialogTitle>
+            <DialogDescription>
+              {reviewAction === "approve"
+                ? "Add an optional comment before approving this request."
+                : "Please provide a reason for rejecting this request."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="review-comment">
+                Comment {reviewAction === "reject" && "(recommended)"}
+              </Label>
+              <Textarea
+                id="review-comment"
+                placeholder={
+                  reviewAction === "approve"
+                    ? "Add a comment (optional)..."
+                    : "Explain why this request is being rejected..."
+                }
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                rows={4}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setReviewDialogOpen(false);
+                setReviewComment("");
+              }}
+              disabled={processingId === reviewRequestId}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReviewSubmit}
+              variant={reviewAction === "reject" ? "destructive" : "default"}
+              disabled={processingId === reviewRequestId}
+            >
+              {processingId === reviewRequestId && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              {reviewAction === "approve" ? "Approve" : "Reject"} Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Balance Initialize Dialog */}
+      <PTOBalanceInitializeDialog
+        open={initializeDialogOpen}
+        onOpenChange={setInitializeDialogOpen}
+        organizationId={profile.organization_id}
+        policies={policies}
+        onSuccess={() => {
+          fetchData();
+          router.refresh();
+        }}
       />
     </div>
   );

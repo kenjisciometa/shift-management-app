@@ -380,7 +380,7 @@ export function ShiftDialog({
         const startDateTime = setMinutes(setHours(baseDate, startHour), startMinute);
         const endDateTime = setMinutes(setHours(baseDate, endHour), endMinute);
 
-        const shiftData = {
+        const shiftData: any = {
           organization_id: organizationId,
           user_id: formData.userId,
           start_time: startDateTime.toISOString(),
@@ -395,6 +395,10 @@ export function ShiftDialog({
           status: formData.isPublished ? "published" : "draft",
           published_at: formData.isPublished ? new Date().toISOString() : null,
         };
+        // Only include position_id if it has a value (column may not exist in schema)
+        if (formData.positionId) {
+          shiftData.position_id = formData.positionId;
+        }
 
         // Update single shift
         const { error } = await supabase
@@ -434,7 +438,7 @@ export function ShiftDialog({
           const firstStartDateTime = setMinutes(setHours(firstDate, startHour), startMinute);
           const firstEndDateTime = setMinutes(setHours(firstDate, endHour), endMinute);
 
-          const firstShiftData = {
+          const firstShiftData: any = {
             organization_id: organizationId,
             user_id: formData.userId,
             start_time: firstStartDateTime.toISOString(),
@@ -450,6 +454,10 @@ export function ShiftDialog({
             published_at: formData.isPublished ? new Date().toISOString() : null,
             repeat_parent_id: null,
           };
+          // Only include position_id if it has a value (column may not exist in schema)
+          if (formData.positionId) {
+            firstShiftData.position_id = formData.positionId;
+          }
 
           const { data: firstShift, error: firstError } = await supabase
             .from("shifts")
@@ -464,7 +472,7 @@ export function ShiftDialog({
             const startDateTime = setMinutes(setHours(date, startHour), startMinute);
             const endDateTime = setMinutes(setHours(date, endHour), endMinute);
 
-            return {
+            const shiftData: any = {
               organization_id: organizationId,
               user_id: formData.userId,
               start_time: startDateTime.toISOString(),
@@ -480,6 +488,11 @@ export function ShiftDialog({
               published_at: formData.isPublished ? new Date().toISOString() : null,
               repeat_parent_id: firstShift.id,
             };
+            // Only include position_id if it has a value (column may not exist in schema)
+            if (formData.positionId) {
+              shiftData.position_id = formData.positionId;
+            }
+            return shiftData;
           });
 
           const { error: remainingError } = await supabase.from("shifts").insert(remainingShifts);
@@ -492,7 +505,7 @@ export function ShiftDialog({
           const startDateTime = setMinutes(setHours(singleDate, startHour), startMinute);
           const endDateTime = setMinutes(setHours(singleDate, endHour), endMinute);
 
-          const shiftData = {
+          const shiftData: any = {
             organization_id: organizationId,
             user_id: formData.userId,
             start_time: startDateTime.toISOString(),
@@ -507,6 +520,10 @@ export function ShiftDialog({
             status: formData.isPublished ? "published" : "draft",
             published_at: formData.isPublished ? new Date().toISOString() : null,
           };
+          // Only include position_id if it has a value (column may not exist in schema)
+          if (formData.positionId) {
+            shiftData.position_id = formData.positionId;
+          }
 
           const { error } = await supabase.from("shifts").insert(shiftData);
           if (error) throw error;

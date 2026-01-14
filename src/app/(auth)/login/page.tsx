@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { signInWithPassword } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +27,6 @@ const errorMessages: Record<string, string> = {
 };
 
 export default function LoginPage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
   const [email, setEmail] = useState("");
@@ -74,19 +74,18 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    // Use server action to ensure cookies are set server-side
+    const formData = new FormData();
+    formData.set("email", email);
+    formData.set("password", password);
 
-    if (error) {
-      setError(error.message);
+    const result = await signInWithPassword(formData);
+
+    if (result?.error) {
+      setError(result.error);
       setLoading(false);
-      return;
     }
-
-    router.push("/dashboard");
-    router.refresh();
+    // If no error, the server action will redirect
   };
 
   const handleGoogleLogin = async () => {

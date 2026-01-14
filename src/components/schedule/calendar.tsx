@@ -31,6 +31,7 @@ import {
   parseISO,
   setHours,
   setMinutes,
+  isWithinInterval,
 } from "date-fns";
 import type { Database } from "@/types/database.types";
 import { createClient } from "@/lib/supabase/client";
@@ -96,12 +97,31 @@ type Location = { id: string; name: string };
 type Department = { id: string; name: string };
 type Position = Database["public"]["Tables"]["positions"]["Row"];
 
+type PTORequest = {
+  id: string;
+  user_id: string;
+  pto_type: string;
+  start_date: string;
+  end_date: string;
+  total_days: number | null;
+  status: string | null;
+  reason: string | null;
+  profiles: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    display_name: string | null;
+    avatar_url: string | null;
+  } | null;
+};
+
 interface ScheduleCalendarProps {
   shifts: Shift[];
   teamMembers: TeamMember[];
   locations: Location[];
   departments: Department[];
   positions: Position[];
+  ptoRequests?: PTORequest[];
   currentDate: Date;
   view: "week" | "month" | "day";
   isAdmin: boolean;
@@ -115,6 +135,7 @@ export function ScheduleCalendar({
   locations,
   departments,
   positions,
+  ptoRequests = [],
   currentDate,
   view,
   isAdmin,
@@ -325,6 +346,18 @@ export function ScheduleCalendar({
     return filteredShifts.filter((shift) => {
       const shiftDate = parseISO(shift.start_time);
       return isSameDay(shiftDate, date);
+    });
+  };
+
+  const getPTOForDay = (date: Date) => {
+    return ptoRequests.filter((pto) => {
+      const startDate = parseISO(pto.start_date);
+      startDate.setHours(0, 0, 0, 0);
+      const endDate = parseISO(pto.end_date);
+      endDate.setHours(23, 59, 59, 999);
+      const checkDate = new Date(date);
+      checkDate.setHours(12, 0, 0, 0);
+      return isWithinInterval(checkDate, { start: startDate, end: endDate });
     });
   };
 
@@ -585,9 +618,11 @@ export function ScheduleCalendar({
               days={days}
               currentDate={currentDate}
               getShiftsForDay={getShiftsForDay}
+              getPTOForDay={getPTOForDay}
               onAddShift={handleAddShift}
               onEditShift={handleEditShift}
               isAdmin={isAdmin}
+              currentUserId={currentUserId}
               selectedShiftIds={selectedShiftIds}
               onSelectChange={handleShiftSelectChange}
             />
@@ -662,22 +697,35 @@ function MonthView({
   days,
   currentDate,
   getShiftsForDay,
+  getPTOForDay,
   onAddShift,
   onEditShift,
   isAdmin,
+  currentUserId,
   selectedShiftIds,
   onSelectChange,
 }: {
   days: Date[];
   currentDate: Date;
   getShiftsForDay: (date: Date) => Shift[];
+  getPTOForDay: (date: Date) => PTORequest[];
   onAddShift: (date: Date) => void;
   onEditShift: (shift: Shift) => void;
   isAdmin: boolean;
+  currentUserId: string;
   selectedShiftIds: Set<string>;
   onSelectChange: (shiftId: string, selected: boolean) => void;
 }) {
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const ptoTypeColors: Record<string, string> = {
+    vacation: "bg-blue-500",
+    sick: "bg-red-500",
+    personal: "bg-purple-500",
+    bereavement: "bg-gray-500",
+    jury_duty: "bg-orange-500",
+    other: "bg-green-500",
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -697,6 +745,9 @@ function MonthView({
       <div className="flex-1 grid grid-cols-7 auto-rows-fr">
         {days.map((day) => {
           const dayShifts = getShiftsForDay(day);
+          const dayPTO = getPTOForDay(day);
+          const userPTO = dayPTO.filter((pto) => pto.user_id === currentUserId);
+          const otherPTO = dayPTO.filter((pto) => pto.user_id !== currentUserId);
 
           return (
             <DroppableDay
@@ -706,6 +757,23 @@ function MonthView({
               isAdmin={isAdmin}
               onAddShift={onAddShift}
             >
+              {/* User's PTO indicators */}
+              {userPTO.length > 0 && (
+                <div className="flex gap-1 mb-1">
+                  {userPTO.map((pto) => (
+                    <div
+                      key={pto.id}
+                      className={cn(
+                        "h-1.5 flex-1 rounded-full",
+                        ptoTypeColors[pto.pto_type] || "bg-gray-500",
+                        pto.status === "pending" && "opacity-60"
+                      )}
+                      title={`${pto.pto_type} - ${pto.status}`}
+                    />
+                  ))}
+                </div>
+              )}
+              {/* Shifts */}
               {dayShifts.slice(0, 3).map((shift) => (
                 <DraggableShift
                   key={shift.id}
@@ -718,7 +786,31 @@ function MonthView({
               ))}
               {dayShifts.length > 3 && (
                 <div className="text-xs text-muted-foreground text-center">
-                  +{dayShifts.length - 3} more
+                  +{dayShifts.length - 3} more shifts
+                </div>
+              )}
+              {/* Other team members' PTO (admin view) */}
+              {isAdmin && otherPTO.length > 0 && (
+                <div className="mt-1 pt-1 border-t border-dashed">
+                  <div className="text-xs text-muted-foreground mb-1">PTO:</div>
+                  {otherPTO.slice(0, 2).map((pto) => (
+                    <div
+                      key={pto.id}
+                      className={cn(
+                        "text-xs px-1 py-0.5 rounded mb-0.5 truncate",
+                        ptoTypeColors[pto.pto_type] || "bg-gray-500",
+                        "text-white"
+                      )}
+                      title={`${pto.profiles?.display_name || pto.profiles?.first_name}: ${pto.pto_type}`}
+                    >
+                      {pto.profiles?.display_name || `${pto.profiles?.first_name} ${pto.profiles?.last_name}`}
+                    </div>
+                  ))}
+                  {otherPTO.length > 2 && (
+                    <div className="text-xs text-muted-foreground">
+                      +{otherPTO.length - 2} more
+                    </div>
+                  )}
                 </div>
               )}
             </DroppableDay>
