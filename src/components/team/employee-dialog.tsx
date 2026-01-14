@@ -36,12 +36,16 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Loader2, Shield, AlertTriangle } from "lucide-react";
+import { Loader2, Shield, AlertTriangle, X, Check } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+type Position = Database["public"]["Tables"]["positions"]["Row"];
 
 type TeamMember = Database["public"]["Tables"]["profiles"]["Row"] & {
   departments: { id: string; name: string } | null;
+  user_positions?: { position_id: string; positions: Position | null }[];
 };
 
 type Department = {
@@ -55,6 +59,7 @@ interface EmployeeDialogProps {
   employee: TeamMember | null;
   currentUser: Profile;
   departments: Department[];
+  positions: Position[];
 }
 
 const roles = [
@@ -76,6 +81,7 @@ export function EmployeeDialog({
   employee,
   currentUser,
   departments,
+  positions,
 }: EmployeeDialogProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -90,10 +96,12 @@ export function EmployeeDialog({
     role: "employee",
     departmentId: "",
     status: "active",
+    positionIds: [] as string[],
   });
 
   useEffect(() => {
     if (employee) {
+      const currentPositionIds = employee.user_positions?.map(up => up.position_id) || [];
       setFormData({
         firstName: employee.first_name,
         lastName: employee.last_name,
@@ -102,9 +110,19 @@ export function EmployeeDialog({
         role: employee.role || "employee",
         departmentId: employee.department_id || "",
         status: employee.status || "active",
+        positionIds: currentPositionIds,
       });
     }
   }, [employee, open]);
+
+  const togglePosition = (positionId: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      positionIds: prev.positionIds.includes(positionId)
+        ? prev.positionIds.filter((id) => id !== positionId)
+        : [...prev.positionIds, positionId],
+    }));
+  };
 
   const canChangeRole = (targetRole: string) => {
     // Owner can change any role
@@ -155,6 +173,29 @@ export function EmployeeDialog({
         .eq("id", employee.id);
 
       if (error) throw error;
+
+      // Update user positions
+      // First, delete all existing positions for this user
+      const { error: deleteError } = await supabase
+        .from("user_positions")
+        .delete()
+        .eq("user_id", employee.id);
+
+      if (deleteError) throw deleteError;
+
+      // Then, insert new positions
+      if (formData.positionIds.length > 0) {
+        const { error: insertError } = await supabase
+          .from("user_positions")
+          .insert(
+            formData.positionIds.map((positionId) => ({
+              user_id: employee.id,
+              position_id: positionId,
+            }))
+          );
+
+        if (insertError) throw insertError;
+      }
 
       toast.success("Employee updated successfully");
       onOpenChange(false);
@@ -332,6 +373,66 @@ export function EmployeeDialog({
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Positions Selection */}
+            {positions.length > 0 && (
+              <div className="space-y-2">
+                <Label>Positions</Label>
+                <div className="flex flex-wrap gap-2">
+                  {formData.positionIds.length > 0 ? (
+                    formData.positionIds.map((posId) => {
+                      const pos = positions.find((p) => p.id === posId);
+                      if (!pos) return null;
+                      return (
+                        <Badge
+                          key={pos.id}
+                          variant="secondary"
+                          className={cn(
+                            "cursor-pointer transition-colors",
+                            `bg-${pos.color}-100 text-${pos.color}-800 hover:bg-${pos.color}-200`
+                          )}
+                          onClick={() => togglePosition(pos.id)}
+                        >
+                          {pos.name}
+                          <X className="h-3 w-3 ml-1" />
+                        </Badge>
+                      );
+                    })
+                  ) : (
+                    <span className="text-sm text-muted-foreground">No positions assigned</span>
+                  )}
+                </div>
+                <div className="border rounded-md p-2 space-y-1 max-h-32 overflow-y-auto">
+                  {positions.filter((p) => p.is_active).map((position) => (
+                    <div
+                      key={position.id}
+                      className={cn(
+                        "flex items-center gap-2 p-2 rounded-md cursor-pointer hover:bg-muted transition-colors",
+                        formData.positionIds.includes(position.id) && "bg-muted"
+                      )}
+                      onClick={() => togglePosition(position.id)}
+                    >
+                      <Checkbox
+                        checked={formData.positionIds.includes(position.id)}
+                        onCheckedChange={() => togglePosition(position.id)}
+                      />
+                      <div
+                        className={cn(
+                          "h-3 w-3 rounded-full",
+                          `bg-${position.color}-500`
+                        )}
+                      />
+                      <span className="text-sm">{position.name}</span>
+                    </div>
+                  ))}
+                  {positions.filter((p) => p.is_active).length === 0 && (
+                    <p className="text-sm text-muted-foreground p-2">
+                      No active positions available
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             <Separator />
 

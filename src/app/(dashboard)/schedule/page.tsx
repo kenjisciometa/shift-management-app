@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { DashboardHeader } from "@/components/dashboard/header";
+import { ScheduleHeader } from "@/components/schedule/schedule-header";
 import { ScheduleCalendar } from "@/components/schedule/calendar";
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO } from "date-fns";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
@@ -27,7 +27,7 @@ export default async function SchedulePage({
   const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
 
   // Parse view and date from search params
-  const view = (params.view as "week" | "month" | "day") || "week";
+  const view = (params.view as "week" | "month" | "day") || "month";
   const currentDate = params.date ? parseISO(params.date) : new Date();
 
   // Calculate date range based on view
@@ -102,7 +102,7 @@ export default async function SchedulePage({
 
   return (
     <>
-      <DashboardHeader title="Schedule" />
+      <ScheduleHeader isAdmin={isAdmin} />
       <div className="flex-1 overflow-hidden">
         <ScheduleCalendar
           shifts={shiftsResult.data || []}

@@ -18,6 +18,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -109,8 +119,13 @@ export function ShiftDialog({
   const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [seriesShiftCount, setSeriesShiftCount] = useState(0);
+  const [deleteSeriesCount, setDeleteSeriesCount] = useState(0);
 
   const isEditing = !!shift;
+  const isPartOfSeries = shift?.repeat_parent_id !== null && shift?.repeat_parent_id !== undefined;
 
   // Form state
   const [formData, setFormData] = useState({
@@ -154,7 +169,7 @@ export function ShiftDialog({
           breakMinutes: shift.break_minutes || 0,
           locationId: shift.location_id || "",
           departmentId: shift.department_id || "",
-          positionId: shift.position_id || "",
+          positionId: "",
           notes: shift.notes || "",
           isPublished: shift.is_published || false,
         });
@@ -297,6 +312,41 @@ export function ShiftDialog({
   // Calculate preview count
   const previewDates = repeatType !== "none" ? generateRepeatDates() : [];
 
+  // Get the repeat group ID (either the shift's own repeat_parent_id or its own id if it's the parent)
+  const getRepeatGroupId = () => {
+    if (!shift) return null;
+    return shift.repeat_parent_id || shift.id;
+  };
+
+  // Check if publish dialog should be shown
+  const checkShowPublishDialog = async () => {
+    if (!shift) return false;
+
+    // Only show dialog if:
+    // 1. We're editing an existing shift
+    // 2. The shift is part of a series (has repeat_parent_id) OR is a parent (other shifts have this as repeat_parent_id)
+    // 3. Publish is being turned ON (was false, now true)
+    const wasPublished = shift.is_published || false;
+    const willBePublished = formData.isPublished;
+
+    if (!willBePublished || wasPublished) return false;
+
+    const repeatGroupId = getRepeatGroupId();
+    if (!repeatGroupId) return false;
+
+    // Count unpublished shifts in the same series
+    const { count, error } = await supabase
+      .from("shifts")
+      .select("*", { count: "exact", head: true })
+      .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`)
+      .eq("is_published", false);
+
+    if (error || !count || count <= 1) return false;
+
+    setSeriesShiftCount(count);
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -305,6 +355,19 @@ export function ShiftDialog({
       return;
     }
 
+    // Check if we need to show publish dialog
+    if (isEditing && shift) {
+      const shouldShowDialog = await checkShowPublishDialog();
+      if (shouldShowDialog) {
+        setShowPublishDialog(true);
+        return;
+      }
+    }
+
+    await executeSubmit("single");
+  };
+
+  const executeSubmit = async (publishMode: "single" | "series") => {
     setLoading(true);
 
     try {
@@ -325,8 +388,7 @@ export function ShiftDialog({
           break_minutes: formData.breakMinutes,
           location_id: formData.locationId || null,
           department_id: formData.departmentId || null,
-          position_id: formData.positionId || null,
-          position: selectedPosition?.name || null,
+          position: formData.positionId ? selectedPosition?.name : null,
           notes: formData.notes || null,
           color: positionColor,
           is_published: formData.isPublished,
@@ -334,21 +396,103 @@ export function ShiftDialog({
           published_at: formData.isPublished ? new Date().toISOString() : null,
         };
 
+        // Update single shift
         const { error } = await supabase
           .from("shifts")
           .update(shiftData)
           .eq("id", shift.id);
 
         if (error) throw error;
-        toast.success("Shift updated successfully");
+
+        // If publishing entire series
+        if (publishMode === "series" && formData.isPublished) {
+          const repeatGroupId = getRepeatGroupId();
+          if (repeatGroupId) {
+            const { error: seriesError } = await supabase
+              .from("shifts")
+              .update({
+                is_published: true,
+                status: "published",
+                published_at: new Date().toISOString(),
+              })
+              .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`)
+              .eq("is_published", false);
+
+            if (seriesError) throw seriesError;
+            toast.success(`${seriesShiftCount} shifts published successfully`);
+          }
+        } else {
+          toast.success("Shift updated successfully");
+        }
       } else {
         // Create new shift(s) with repeat
         const repeatDates = generateRepeatDates();
-        const shiftsToCreate = repeatDates.map((date) => {
-          const startDateTime = setMinutes(setHours(date, startHour), startMinute);
-          const endDateTime = setMinutes(setHours(date, endHour), endMinute);
 
-          return {
+        if (repeatDates.length > 1) {
+          // Create first shift to get its ID as repeat_parent_id
+          const firstDate = repeatDates[0];
+          const firstStartDateTime = setMinutes(setHours(firstDate, startHour), startMinute);
+          const firstEndDateTime = setMinutes(setHours(firstDate, endHour), endMinute);
+
+          const firstShiftData = {
+            organization_id: organizationId,
+            user_id: formData.userId,
+            start_time: firstStartDateTime.toISOString(),
+            end_time: firstEndDateTime.toISOString(),
+            break_minutes: formData.breakMinutes,
+            location_id: formData.locationId || null,
+            department_id: formData.departmentId || null,
+            position: formData.positionId ? selectedPosition?.name : null,
+            notes: formData.notes || null,
+            color: positionColor,
+            is_published: formData.isPublished,
+            status: formData.isPublished ? "published" : "draft",
+            published_at: formData.isPublished ? new Date().toISOString() : null,
+            repeat_parent_id: null,
+          };
+
+          const { data: firstShift, error: firstError } = await supabase
+            .from("shifts")
+            .insert(firstShiftData)
+            .select("id")
+            .single();
+
+          if (firstError) throw firstError;
+
+          // Create remaining shifts with repeat_parent_id
+          const remainingShifts = repeatDates.slice(1).map((date) => {
+            const startDateTime = setMinutes(setHours(date, startHour), startMinute);
+            const endDateTime = setMinutes(setHours(date, endHour), endMinute);
+
+            return {
+              organization_id: organizationId,
+              user_id: formData.userId,
+              start_time: startDateTime.toISOString(),
+              end_time: endDateTime.toISOString(),
+              break_minutes: formData.breakMinutes,
+              location_id: formData.locationId || null,
+              department_id: formData.departmentId || null,
+              position: formData.positionId ? selectedPosition?.name : null,
+              notes: formData.notes || null,
+              color: positionColor,
+              is_published: formData.isPublished,
+              status: formData.isPublished ? "published" : "draft",
+              published_at: formData.isPublished ? new Date().toISOString() : null,
+              repeat_parent_id: firstShift.id,
+            };
+          });
+
+          const { error: remainingError } = await supabase.from("shifts").insert(remainingShifts);
+          if (remainingError) throw remainingError;
+
+          toast.success(`${repeatDates.length} shifts created successfully`);
+        } else {
+          // Single shift creation
+          const singleDate = repeatDates[0];
+          const startDateTime = setMinutes(setHours(singleDate, startHour), startMinute);
+          const endDateTime = setMinutes(setHours(singleDate, endHour), endMinute);
+
+          const shiftData = {
             organization_id: organizationId,
             user_id: formData.userId,
             start_time: startDateTime.toISOString(),
@@ -356,24 +500,18 @@ export function ShiftDialog({
             break_minutes: formData.breakMinutes,
             location_id: formData.locationId || null,
             department_id: formData.departmentId || null,
-            position_id: formData.positionId || null,
-            position: selectedPosition?.name || null,
+            position: formData.positionId ? selectedPosition?.name : null,
             notes: formData.notes || null,
             color: positionColor,
             is_published: formData.isPublished,
             status: formData.isPublished ? "published" : "draft",
             published_at: formData.isPublished ? new Date().toISOString() : null,
           };
-        });
 
-        const { error } = await supabase.from("shifts").insert(shiftsToCreate);
-
-        if (error) throw error;
-        toast.success(
-          shiftsToCreate.length > 1
-            ? `${shiftsToCreate.length} shifts created successfully`
-            : "Shift created successfully"
-        );
+          const { error } = await supabase.from("shifts").insert(shiftData);
+          if (error) throw error;
+          toast.success("Shift created successfully");
+        }
       }
 
       onOpenChange(false);
@@ -386,19 +524,59 @@ export function ShiftDialog({
     }
   };
 
+  const handlePublishDialogChoice = (choice: "single" | "series" | "cancel") => {
+    setShowPublishDialog(false);
+    if (choice === "cancel") return;
+    executeSubmit(choice);
+  };
+
   const handleDelete = async () => {
     if (!shift) return;
 
-    if (!confirm("Are you sure you want to delete this shift?")) return;
+    // Check if shift is part of a series and count shifts
+    const repeatGroupId = getRepeatGroupId();
+    if (repeatGroupId) {
+      const { count, error } = await supabase
+        .from("shifts")
+        .select("*", { count: "exact", head: true })
+        .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`);
+
+      if (!error && count && count > 1) {
+        setDeleteSeriesCount(count);
+      } else {
+        setDeleteSeriesCount(0);
+      }
+    } else {
+      setDeleteSeriesCount(0);
+    }
+
+    setShowDeleteDialog(true);
+  };
+
+  const executeDelete = async (mode: "single" | "series") => {
+    if (!shift) return;
 
     setDeleting(true);
+    setShowDeleteDialog(false);
 
     try {
-      const { error } = await supabase.from("shifts").delete().eq("id", shift.id);
+      if (mode === "series" && deleteSeriesCount > 1) {
+        const repeatGroupId = getRepeatGroupId();
+        if (repeatGroupId) {
+          const { error } = await supabase
+            .from("shifts")
+            .delete()
+            .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`);
 
-      if (error) throw error;
+          if (error) throw error;
+          toast.success(`${deleteSeriesCount} shifts deleted successfully`);
+        }
+      } else {
+        const { error } = await supabase.from("shifts").delete().eq("id", shift.id);
+        if (error) throw error;
+        toast.success("Shift deleted successfully");
+      }
 
-      toast.success("Shift deleted successfully");
       onOpenChange(false);
       router.refresh();
     } catch (error) {
@@ -790,6 +968,86 @@ export function ShiftDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      {/* Publish Series Confirmation Dialog */}
+      <AlertDialog open={showPublishDialog} onOpenChange={setShowPublishDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Publish Shifts</AlertDialogTitle>
+            <AlertDialogDescription>
+              This shift is part of a recurring series. Would you like to publish all {seriesShiftCount} unpublished shifts in this series, or just this one?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel onClick={() => handlePublishDialogChoice("cancel")}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant="outline"
+              onClick={() => handlePublishDialogChoice("single")}
+            >
+              This shift only
+            </Button>
+            <AlertDialogAction onClick={() => handlePublishDialogChoice("series")}>
+              Publish all ({seriesShiftCount})
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader className="space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10">
+              <Trash2 className="h-7 w-7 text-destructive" />
+            </div>
+            <AlertDialogTitle className="text-center text-xl">
+              Delete Shift{deleteSeriesCount > 1 ? "s" : ""}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center">
+              {deleteSeriesCount > 1 ? (
+                <>
+                  This shift is part of a recurring series ({deleteSeriesCount} shifts).
+                  <br />
+                  Would you like to delete all shifts in this series or just this one?
+                </>
+              ) : (
+                "Are you sure you want to delete this shift? This action cannot be undone."
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col-reverse sm:flex-row sm:justify-center gap-2 mt-4">
+            <AlertDialogCancel>
+              Cancel
+            </AlertDialogCancel>
+            {deleteSeriesCount > 1 ? (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => executeDelete("single")}
+                  className="border-destructive text-destructive hover:bg-destructive/10"
+                >
+                  This shift only
+                </Button>
+                <AlertDialogAction
+                  onClick={() => executeDelete("series")}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete all ({deleteSeriesCount})
+                </AlertDialogAction>
+              </>
+            ) : (
+              <AlertDialogAction
+                onClick={() => executeDelete("single")}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

@@ -101,7 +101,7 @@ export function InviteDialog({
       expiresAt.setDate(expiresAt.getDate() + 7);
 
       // Create invitation
-      const { error } = await supabase.from("employee_invitations").insert({
+      const insertData = {
         organization_id: profile.organization_id,
         email: formData.email.toLowerCase().trim(),
         first_name: formData.firstName.trim(),
@@ -112,13 +112,18 @@ export function InviteDialog({
         status: "pending",
         invited_by: profile.id,
         expires_at: expiresAt.toISOString(),
-      });
+      };
+      console.log("Inserting invitation:", insertData);
+
+      const { error } = await supabase.from("employee_invitations").insert(insertData);
 
       if (error) {
+        console.error("Supabase insert error (full):", JSON.stringify(error, null, 2));
+        console.error("Error keys:", Object.keys(error));
         if (error.code === "23505") {
           toast.error("An invitation for this email already exists");
         } else {
-          throw error;
+          toast.error(error.message || "Failed to create invitation");
         }
         return;
       }
@@ -130,9 +135,10 @@ export function InviteDialog({
 
       toast.success("Invitation created");
       router.refresh();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to create invitation");
+    } catch (error: unknown) {
+      console.error("Invitation error:", error);
+      const supabaseError = error as { message?: string; code?: string; details?: string };
+      toast.error(supabaseError?.message || "Failed to create invitation");
     } finally {
       setLoading(false);
     }

@@ -40,11 +40,9 @@ import {
   Globe,
   Map,
   List,
-  Briefcase,
 } from "lucide-react";
 import { LocationDialog } from "./location-dialog";
 import { DepartmentDialog } from "./department-dialog";
-import { PositionDialog } from "./position-dialog";
 import { LocationMap } from "./location-map";
 import { PTOPolicyManager } from "@/components/pto/policy-manager";
 
@@ -69,14 +67,12 @@ type TeamMember = {
 };
 
 type PTOPolicy = Database["public"]["Tables"]["pto_policies"]["Row"];
-type Position = Database["public"]["Tables"]["positions"]["Row"];
 
 interface OrganizationSettingsProps {
   profile: Profile;
   organization: Organization;
   locations: Location[];
   departments: Department[];
-  positions: Position[];
   teamMembers: TeamMember[];
   ptoPolicies: PTOPolicy[];
 }
@@ -97,7 +93,6 @@ export function OrganizationSettings({
   organization,
   locations,
   departments,
-  positions,
   teamMembers,
   ptoPolicies,
 }: OrganizationSettingsProps) {
@@ -117,8 +112,6 @@ export function OrganizationSettings({
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
   const [departmentDialogOpen, setDepartmentDialogOpen] = useState(false);
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
-  const [positionDialogOpen, setPositionDialogOpen] = useState(false);
-  const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
 
   // Location view mode
   const [locationViewMode, setLocationViewMode] = useState<"list" | "map">("list");
@@ -192,26 +185,6 @@ export function OrganizationSettings({
     }
   };
 
-  const handleDeletePosition = async (positionId: string) => {
-    setProcessingId(positionId);
-    try {
-      const { error } = await supabase
-        .from("positions")
-        .delete()
-        .eq("id", positionId);
-
-      if (error) throw error;
-
-      toast.success("Position deleted");
-      router.refresh();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to delete position");
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
   const getDisplayName = (p: { first_name: string; last_name: string; display_name: string | null } | null) => {
     if (!p) return "No manager";
     if (p.display_name) return p.display_name;
@@ -225,7 +198,6 @@ export function OrganizationSettings({
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="locations">Locations</TabsTrigger>
           <TabsTrigger value="departments">Departments</TabsTrigger>
-          <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="pto-policies">PTO Policies</TabsTrigger>
         </TabsList>
 
@@ -528,122 +500,6 @@ export function OrganizationSettings({
           )}
         </TabsContent>
 
-        {/* Positions */}
-        <TabsContent value="positions" className="mt-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-lg font-semibold">Positions</h2>
-              <p className="text-sm text-muted-foreground">
-                Define job positions and their colors for shift management
-              </p>
-            </div>
-            <Button
-              onClick={() => {
-                setSelectedPosition(null);
-                setPositionDialogOpen(true);
-              }}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Position
-            </Button>
-          </div>
-
-          {positions.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2">
-              {positions.map((position) => (
-                <Card key={position.id} className="group">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <div
-                          className={`h-10 w-10 rounded-lg flex items-center justify-center bg-${position.color}-500`}
-                          style={{
-                            backgroundColor:
-                              position.color === "blue" ? "#3b82f6" :
-                              position.color === "green" ? "#22c55e" :
-                              position.color === "yellow" ? "#eab308" :
-                              position.color === "red" ? "#ef4444" :
-                              position.color === "purple" ? "#a855f7" :
-                              position.color === "pink" ? "#ec4899" :
-                              position.color === "orange" ? "#f97316" :
-                              position.color === "cyan" ? "#06b6d4" :
-                              position.color === "indigo" ? "#6366f1" :
-                              position.color === "teal" ? "#14b8a6" :
-                              "#3b82f6"
-                          }}
-                        >
-                          <Briefcase className="h-5 w-5 text-white" />
-                        </div>
-                        <div>
-                          <h3 className="font-medium">{position.name}</h3>
-                          {position.description && (
-                            <p className="text-sm text-muted-foreground">
-                              {position.description}
-                            </p>
-                          )}
-                          <div className="flex items-center gap-2 mt-2">
-                            <Badge variant={position.is_active ? "default" : "secondary"}>
-                              {position.is_active ? "Active" : "Inactive"}
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100"
-                            disabled={processingId === position.id}
-                          >
-                            {processingId === position.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <MoreHorizontal className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedPosition(position);
-                              setPositionDialogOpen(true);
-                            }}
-                          >
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => handleDeletePosition(position.id)}
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-10">
-                <Briefcase className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No positions configured</p>
-                <Button
-                  variant="link"
-                  onClick={() => {
-                    setSelectedPosition(null);
-                    setPositionDialogOpen(true);
-                  }}
-                >
-                  Add your first position
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
         {/* PTO Policies */}
         <TabsContent value="pto-policies" className="mt-6">
           <PTOPolicyManager
@@ -668,14 +524,6 @@ export function OrganizationSettings({
         department={selectedDepartment}
         organizationId={organization.id}
         teamMembers={teamMembers}
-      />
-
-      {/* Position Dialog */}
-      <PositionDialog
-        open={positionDialogOpen}
-        onOpenChange={setPositionDialogOpen}
-        position={selectedPosition}
-        organizationId={organization.id}
       />
     </div>
   );

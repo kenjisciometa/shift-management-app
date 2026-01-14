@@ -22,7 +22,7 @@ export default async function DashboardLayout({
   return (
     <SidebarProvider>
       <DashboardNav user={{ id: authData.user.id, email: authData.user.email }} profile={authData.profile} />
-      <main className="flex-1 overflow-auto md:ml-64">
+      <main className="flex-1 overflow-auto md:peer-data-[state=expanded]:ml-64 md:peer-data-[state=collapsed]:ml-0 transition-[margin] duration-200 ease-linear">
         {children}
       </main>
       <Toaster />

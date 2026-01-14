@@ -71,46 +71,56 @@ export function AcceptInvitation({ invitation, isLoggedIn }: AcceptInvitationPro
         return;
       }
 
-      // Create profile
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: authData.user.id,
-        organization_id: invitation.organization_id,
-        department_id: invitation.department_id,
-        first_name: invitation.first_name || "",
-        last_name: invitation.last_name || "",
-        email: invitation.email,
-        role: invitation.role || "employee",
-        status: "active",
+      // Create profile and accept invitation via API route (bypasses RLS)
+      console.log("Calling accept invitation API...", {
+        userId: authData.user.id,
+        invitationId: invitation.id,
+        hasToken: !!invitation.token,
       });
 
-      if (profileError) {
-        console.error("Profile error:", profileError);
-        // Profile might be created by trigger, continue anyway
+      const response = await fetch("/api/invitations/accept", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: authData.user.id,
+          invitationId: invitation.id,
+          token: invitation.token,
+        }),
+      });
+
+      console.log("API response status:", response.status);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("API error:", errorData);
+        // API failed - user needs to confirm email manually
+        setStep("success");
+        toast.info("Please check your email to confirm your account.");
+        setTimeout(() => {
+          router.push("/login");
+        }, 3000);
+        return;
       }
 
-      // Mark invitation as accepted
-      const { error: inviteError } = await supabase
-        .from("employee_invitations")
-        .update({
-          status: "accepted",
-          accepted_at: new Date().toISOString(),
-        })
-        .eq("id", invitation.id);
-
-      if (inviteError) {
-        console.error("Invitation error:", inviteError);
-      }
+      console.log("API call successful");
 
       setStep("success");
-      toast.success("Account created successfully!");
+      toast.success("Account created! Please sign in to continue.");
 
-      // Redirect after a short delay
+      // Redirect to login page after a short delay
       setTimeout(() => {
-        router.push("/dashboard");
+        router.push("/login");
       }, 2000);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to create account");
+      // Show email confirmation message on error
+      setStep("success");
+      toast.info("Please check your email to confirm your account.");
+      setTimeout(() => {
+        router.push("/login");
+      }, 3000);
     } finally {
       setLoading(false);
     }
@@ -128,34 +138,22 @@ export function AcceptInvitation({ invitation, isLoggedIn }: AcceptInvitationPro
         return;
       }
 
-      // Update or create profile
-      const { error: profileError } = await supabase.from("profiles").upsert({
-        id: user.id,
-        organization_id: invitation.organization_id,
-        department_id: invitation.department_id,
-        first_name: invitation.first_name || "",
-        last_name: invitation.last_name || "",
-        email: invitation.email,
-        role: invitation.role || "employee",
-        status: "active",
+      // Accept invitation via API route (bypasses RLS)
+      const response = await fetch("/api/invitations/accept", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          invitationId: invitation.id,
+          token: invitation.token,
+        }),
       });
 
-      if (profileError) {
-        console.error("Profile error:", profileError);
-        throw profileError;
-      }
-
-      // Mark invitation as accepted
-      const { error: inviteError } = await supabase
-        .from("employee_invitations")
-        .update({
-          status: "accepted",
-          accepted_at: new Date().toISOString(),
-        })
-        .eq("id", invitation.id);
-
-      if (inviteError) {
-        console.error("Invitation error:", inviteError);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to accept invitation");
       }
 
       setStep("success");
@@ -178,13 +176,16 @@ export function AcceptInvitation({ invitation, isLoggedIn }: AcceptInvitationPro
       <Card className="max-w-md w-full">
         <CardContent className="pt-6 text-center">
           <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Welcome!</h2>
+          <h2 className="text-2xl font-bold mb-2">Account Created!</h2>
           <p className="text-muted-foreground mb-4">
-            You have successfully joined {invitation.organizations?.name}.
+            Your account has been created for {invitation.organizations?.name || "your organization"}.
           </p>
-          <p className="text-sm text-muted-foreground">
-            Redirecting to dashboard...
+          <p className="text-sm text-muted-foreground mb-4">
+            Please check your email to confirm your account, then sign in.
           </p>
+          <Button onClick={() => router.push("/login")} className="w-full">
+            Go to Login
+          </Button>
         </CardContent>
       </Card>
     );

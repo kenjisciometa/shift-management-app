@@ -20,7 +20,7 @@ export default async function OrganizationPage() {
   const supabase = await getCachedSupabase();
 
   // Parallel fetch all data
-  const [locationsResult, departmentsResult, positionsResult, teamMembersResult, ptoPoliciesResult] = await Promise.all([
+  const [locationsResult, departmentsResult, teamMembersResult, ptoPoliciesResult] = await Promise.all([
     // Get locations
     supabase
       .from("locations")
@@ -39,12 +39,6 @@ export default async function OrganizationPage() {
           display_name
         )
       `)
-      .eq("organization_id", profile.organization_id)
-      .order("sort_order"),
-    // Get positions
-    supabase
-      .from("positions")
-      .select("*")
       .eq("organization_id", profile.organization_id)
       .order("sort_order"),
     // Get team members for department manager selection
@@ -72,7 +66,6 @@ export default async function OrganizationPage() {
           organization={profile.organizations!}
           locations={locationsResult.data || []}
           departments={departmentsResult.data || []}
-          positions={positionsResult.data || []}
           teamMembers={teamMembersResult.data || []}
           ptoPolicies={ptoPoliciesResult.data || []}
         />

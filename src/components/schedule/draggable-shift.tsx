@@ -1,11 +1,12 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, differenceInMinutes } from "date-fns";
 import type { Database } from "@/types/database.types";
 import { cn } from "@/lib/utils";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { GripVertical } from "lucide-react";
 
 type Shift = Database["public"]["Tables"]["shifts"]["Row"] & {
@@ -24,25 +25,76 @@ interface DraggableShiftProps {
   shift: Shift;
   onClick?: (e: React.MouseEvent) => void;
   isDraggable?: boolean;
+  isSelected?: boolean;
+  onSelectChange?: (shiftId: string, selected: boolean) => void;
 }
 
-const shiftColors: Record<string, string> = {
-  blue: "bg-blue-100 border-blue-300 text-blue-900 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-100",
-  green: "bg-green-100 border-green-300 text-green-900 dark:bg-green-900/30 dark:border-green-700 dark:text-green-100",
-  yellow: "bg-yellow-100 border-yellow-300 text-yellow-900 dark:bg-yellow-900/30 dark:border-yellow-700 dark:text-yellow-100",
-  red: "bg-red-100 border-red-300 text-red-900 dark:bg-red-900/30 dark:border-red-700 dark:text-red-100",
-  purple: "bg-purple-100 border-purple-300 text-purple-900 dark:bg-purple-900/30 dark:border-purple-700 dark:text-purple-100",
-  pink: "bg-pink-100 border-pink-300 text-pink-900 dark:bg-pink-900/30 dark:border-pink-700 dark:text-pink-100",
-  orange: "bg-orange-100 border-orange-300 text-orange-900 dark:bg-orange-900/30 dark:border-orange-700 dark:text-orange-100",
-  default: "bg-slate-100 border-slate-300 text-slate-900 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100",
+const shiftColors: Record<string, { published: string; draft: string }> = {
+  blue: {
+    published: "bg-blue-500 border !border-blue-600 text-white dark:bg-blue-600 dark:!border-blue-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-blue-400 text-blue-600 dark:!border-blue-500 dark:text-blue-400",
+  },
+  green: {
+    published: "bg-green-500 border !border-green-600 text-white dark:bg-green-600 dark:!border-green-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-green-400 text-green-600 dark:!border-green-500 dark:text-green-400",
+  },
+  yellow: {
+    published: "bg-yellow-500 border !border-yellow-600 text-white dark:bg-yellow-600 dark:!border-yellow-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-yellow-400 text-yellow-600 dark:!border-yellow-500 dark:text-yellow-400",
+  },
+  red: {
+    published: "bg-red-500 border !border-red-600 text-white dark:bg-red-600 dark:!border-red-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-red-400 text-red-600 dark:!border-red-500 dark:text-red-400",
+  },
+  purple: {
+    published: "bg-purple-500 border !border-purple-600 text-white dark:bg-purple-600 dark:!border-purple-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-purple-400 text-purple-600 dark:!border-purple-500 dark:text-purple-400",
+  },
+  pink: {
+    published: "bg-pink-500 border !border-pink-600 text-white dark:bg-pink-600 dark:!border-pink-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-pink-400 text-pink-600 dark:!border-pink-500 dark:text-pink-400",
+  },
+  orange: {
+    published: "bg-orange-500 border !border-orange-600 text-white dark:bg-orange-600 dark:!border-orange-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-orange-400 text-orange-600 dark:!border-orange-500 dark:text-orange-400",
+  },
+  default: {
+    published: "bg-slate-500 border !border-slate-600 text-white dark:bg-slate-600 dark:!border-slate-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-slate-400 text-slate-600 dark:!border-slate-500 dark:text-slate-400",
+  },
 };
 
-export function DraggableShift({ shift, onClick, isDraggable = true }: DraggableShiftProps) {
+const getColorClass = (color: string | null, isPublished: boolean) => {
+  const colorConfig = shiftColors[color || "default"] || shiftColors.default;
+  return isPublished ? colorConfig.published : colorConfig.draft;
+};
+
+const formatDuration = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (mins === 0) {
+    return `${hours}H`;
+  }
+  return `${hours}H${mins}M`;
+};
+
+export function DraggableShift({
+  shift,
+  onClick,
+  isDraggable = true,
+  isSelected = false,
+  onSelectChange,
+}: DraggableShiftProps) {
+  const [mounted, setMounted] = useState(false);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: shift.id,
     data: { shift },
     disabled: !isDraggable,
   });
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const style = transform
     ? {
@@ -53,7 +105,9 @@ export function DraggableShift({ shift, onClick, isDraggable = true }: Draggable
 
   const startTime = parseISO(shift.start_time);
   const endTime = parseISO(shift.end_time);
-  const colorClass = shiftColors[shift.color || "default"] || shiftColors.default;
+  const colorClass = getColorClass(shift.color, shift.is_published ?? false);
+  const durationMinutes = differenceInMinutes(endTime, startTime);
+  const durationText = formatDuration(durationMinutes);
 
   const getDisplayName = () => {
     if (!shift.profiles) return "Unassigned";
@@ -61,17 +115,14 @@ export function DraggableShift({ shift, onClick, isDraggable = true }: Draggable
     return `${shift.profiles.first_name} ${shift.profiles.last_name}`;
   };
 
-  const getInitials = () => {
-    if (!shift.profiles) return "?";
-    return `${shift.profiles.first_name[0]}${shift.profiles.last_name[0]}`.toUpperCase();
-  };
+  const isPublished = shift.is_published ?? false;
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        "p-2 rounded-lg border cursor-pointer transition-shadow",
+        "p-2 rounded-lg cursor-pointer transition-shadow",
         colorClass,
         isDragging && "opacity-50 shadow-lg",
         isDraggable && "hover:shadow-md"
@@ -80,23 +131,32 @@ export function DraggableShift({ shift, onClick, isDraggable = true }: Draggable
     >
       <div className="flex items-start gap-2">
         {isDraggable && (
-          <div
-            {...attributes}
-            {...listeners}
-            className="cursor-grab active:cursor-grabbing p-1 -ml-1 opacity-50 hover:opacity-100"
-          >
-            <GripVertical className="h-4 w-4" />
+          <div className="flex flex-col items-center gap-1 -ml-1">
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={(checked) => {
+                onSelectChange?.(shift.id, checked === true);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "h-4 w-4",
+                isPublished && "border-white bg-transparent data-[state=checked]:bg-white data-[state=checked]:border-white data-[state=checked]:text-slate-900"
+              )}
+            />
+            <div
+              {...(mounted ? attributes : {})}
+              {...(mounted ? listeners : {})}
+              className="cursor-grab active:cursor-grabbing p-1 opacity-50 hover:opacity-100"
+            >
+              <GripVertical className={cn("h-4 w-4", isPublished && "text-white")} />
+            </div>
           </div>
         )}
-        <Avatar className="h-8 w-8 shrink-0">
-          <AvatarImage src={shift.profiles?.avatar_url || undefined} />
-          <AvatarFallback className="text-xs">{getInitials()}</AvatarFallback>
-        </Avatar>
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-sm truncate">{getDisplayName()}</div>
-          <div className="text-xs opacity-80">
-            {format(startTime, "h:mm a")} - {format(endTime, "h:mm a")}
+          <div className="text-[10px] opacity-80 whitespace-nowrap">
+            {format(startTime, "h:mm")} - {format(endTime, "h:mm a")}・{durationText}
           </div>
+          <div className="font-medium text-sm truncate">{getDisplayName()}</div>
           {shift.position && (
             <div className="text-xs opacity-70 truncate">{shift.position}</div>
           )}

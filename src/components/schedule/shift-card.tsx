@@ -1,9 +1,8 @@
 "use client";
 
-import { format, parseISO } from "date-fns";
+import { format, parseISO, differenceInMinutes } from "date-fns";
 import type { Database } from "@/types/database.types";
 import { cn } from "@/lib/utils";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { MapPin, Clock } from "lucide-react";
 
@@ -26,21 +25,61 @@ interface ShiftCardProps {
   onClick?: (e: React.MouseEvent) => void;
 }
 
-const shiftColors: Record<string, string> = {
-  blue: "bg-blue-100 border-blue-300 text-blue-900 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-100",
-  green: "bg-green-100 border-green-300 text-green-900 dark:bg-green-900/30 dark:border-green-700 dark:text-green-100",
-  yellow: "bg-yellow-100 border-yellow-300 text-yellow-900 dark:bg-yellow-900/30 dark:border-yellow-700 dark:text-yellow-100",
-  red: "bg-red-100 border-red-300 text-red-900 dark:bg-red-900/30 dark:border-red-700 dark:text-red-100",
-  purple: "bg-purple-100 border-purple-300 text-purple-900 dark:bg-purple-900/30 dark:border-purple-700 dark:text-purple-100",
-  pink: "bg-pink-100 border-pink-300 text-pink-900 dark:bg-pink-900/30 dark:border-pink-700 dark:text-pink-100",
-  orange: "bg-orange-100 border-orange-300 text-orange-900 dark:bg-orange-900/30 dark:border-orange-700 dark:text-orange-100",
-  default: "bg-slate-100 border-slate-300 text-slate-900 dark:bg-slate-800 dark:border-slate-600 dark:text-slate-100",
+const shiftColors: Record<string, { published: string; draft: string }> = {
+  blue: {
+    published: "bg-blue-500 border !border-blue-600 text-white dark:bg-blue-600 dark:!border-blue-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-blue-400 text-blue-600 dark:!border-blue-500 dark:text-blue-400",
+  },
+  green: {
+    published: "bg-green-500 border !border-green-600 text-white dark:bg-green-600 dark:!border-green-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-green-400 text-green-600 dark:!border-green-500 dark:text-green-400",
+  },
+  yellow: {
+    published: "bg-yellow-500 border !border-yellow-600 text-white dark:bg-yellow-600 dark:!border-yellow-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-yellow-400 text-yellow-600 dark:!border-yellow-500 dark:text-yellow-400",
+  },
+  red: {
+    published: "bg-red-500 border !border-red-600 text-white dark:bg-red-600 dark:!border-red-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-red-400 text-red-600 dark:!border-red-500 dark:text-red-400",
+  },
+  purple: {
+    published: "bg-purple-500 border !border-purple-600 text-white dark:bg-purple-600 dark:!border-purple-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-purple-400 text-purple-600 dark:!border-purple-500 dark:text-purple-400",
+  },
+  pink: {
+    published: "bg-pink-500 border !border-pink-600 text-white dark:bg-pink-600 dark:!border-pink-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-pink-400 text-pink-600 dark:!border-pink-500 dark:text-pink-400",
+  },
+  orange: {
+    published: "bg-orange-500 border !border-orange-600 text-white dark:bg-orange-600 dark:!border-orange-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-orange-400 text-orange-600 dark:!border-orange-500 dark:text-orange-400",
+  },
+  default: {
+    published: "bg-slate-500 border !border-slate-600 text-white dark:bg-slate-600 dark:!border-slate-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-slate-400 text-slate-600 dark:!border-slate-500 dark:text-slate-400",
+  },
+};
+
+const getColorClass = (color: string | null, isPublished: boolean) => {
+  const colorConfig = shiftColors[color || "default"] || shiftColors.default;
+  return isPublished ? colorConfig.published : colorConfig.draft;
+};
+
+const formatDuration = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (mins === 0) {
+    return `${hours}H`;
+  }
+  return `${hours}H${mins}M`;
 };
 
 export function ShiftCard({ shift, compact, expanded, onClick }: ShiftCardProps) {
   const startTime = parseISO(shift.start_time);
   const endTime = parseISO(shift.end_time);
-  const colorClass = shiftColors[shift.color || "default"] || shiftColors.default;
+  const colorClass = getColorClass(shift.color, shift.is_published ?? false);
+  const durationMinutes = differenceInMinutes(endTime, startTime);
+  const durationText = formatDuration(durationMinutes);
 
   const getDisplayName = () => {
     if (!shift.profiles) return "Unassigned";
@@ -48,16 +87,11 @@ export function ShiftCard({ shift, compact, expanded, onClick }: ShiftCardProps)
     return `${shift.profiles.first_name} ${shift.profiles.last_name}`;
   };
 
-  const getInitials = () => {
-    if (!shift.profiles) return "?";
-    return `${shift.profiles.first_name[0]}${shift.profiles.last_name[0]}`.toUpperCase();
-  };
-
   if (compact) {
     return (
       <div
         className={cn(
-          "text-xs p-1 rounded border cursor-pointer truncate",
+          "text-xs p-1 rounded cursor-pointer truncate",
           colorClass
         )}
         onClick={onClick}
@@ -73,34 +107,28 @@ export function ShiftCard({ shift, compact, expanded, onClick }: ShiftCardProps)
     return (
       <div
         className={cn(
-          "p-3 rounded-lg border cursor-pointer min-w-[200px]",
+          "p-3 rounded-lg cursor-pointer min-w-[200px]",
           colorClass
         )}
         onClick={onClick}
       >
-        <div className="flex items-start gap-3">
-          <Avatar className="h-10 w-10">
-            <AvatarImage src={shift.profiles?.avatar_url || undefined} />
-            <AvatarFallback>{getInitials()}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <div className="font-medium truncate">{getDisplayName()}</div>
-            <div className="flex items-center gap-1 text-sm opacity-80">
-              <Clock className="h-3 w-3" />
-              {format(startTime, "h:mm a")} - {format(endTime, "h:mm a")}
-            </div>
-            {shift.locations && (
-              <div className="flex items-center gap-1 text-sm opacity-70">
-                <MapPin className="h-3 w-3" />
-                {shift.locations.name}
-              </div>
-            )}
-            {shift.position && (
-              <Badge variant="outline" className="mt-1 text-xs">
-                {shift.position}
-              </Badge>
-            )}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 text-sm opacity-80">
+            <Clock className="h-3 w-3" />
+            {format(startTime, "h:mm a")} - {format(endTime, "h:mm a")}・{durationText}
           </div>
+          <div className="font-medium truncate">{getDisplayName()}</div>
+          {shift.locations && (
+            <div className="flex items-center gap-1 text-sm opacity-70">
+              <MapPin className="h-3 w-3" />
+              {shift.locations.name}
+            </div>
+          )}
+          {shift.position && (
+            <Badge variant="outline" className="mt-1 text-xs">
+              {shift.position}
+            </Badge>
+          )}
         </div>
         {!shift.is_published && (
           <Badge variant="secondary" className="mt-2 text-xs">
@@ -115,15 +143,15 @@ export function ShiftCard({ shift, compact, expanded, onClick }: ShiftCardProps)
   return (
     <div
       className={cn(
-        "absolute left-0 right-0 mx-1 p-1 rounded border text-xs cursor-pointer overflow-hidden",
+        "absolute left-0 right-0 mx-1 p-1 rounded text-xs cursor-pointer overflow-hidden",
         colorClass
       )}
       onClick={onClick}
     >
-      <div className="font-medium truncate">{getDisplayName()}</div>
       <div className="opacity-80">
-        {format(startTime, "h:mm")} - {format(endTime, "h:mm a")}
+        {format(startTime, "h:mm")} - {format(endTime, "h:mm a")}・{durationText}
       </div>
+      <div className="font-medium truncate">{getDisplayName()}</div>
     </div>
   );
 }

@@ -67,13 +67,6 @@ const ptoTypeColors: Record<string, string> = {
   other: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
 };
 
-const accrualMethodLabels: Record<string, string> = {
-  annual: "Annual",
-  monthly: "Monthly",
-  per_pay_period: "Per Pay Period",
-  hourly: "Hourly",
-};
-
 export function PTOPolicyManager({
   policies,
   organizationId,
@@ -211,11 +204,6 @@ export function PTOPolicyManager({
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-                {policy.description && (
-                  <CardDescription className="mt-2">
-                    {policy.description}
-                  </CardDescription>
-                )}
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-4 text-sm">
@@ -231,9 +219,9 @@ export function PTOPolicyManager({
                   <div className="flex items-center gap-2">
                     <Clock className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <div className="text-muted-foreground">Accrual</div>
+                      <div className="text-muted-foreground">Accrual Rate</div>
                       <div className="font-medium">
-                        {accrualMethodLabels[policy.accrual_method || "annual"]}
+                        {Number(policy.accrual_rate || 0).toFixed(2)} days/month
                       </div>
                     </div>
                   </div>
@@ -257,25 +245,11 @@ export function PTOPolicyManager({
                   </div>
                 </div>
 
-                {(Number(policy.waiting_period_days) > 0 ||
-                  Number(policy.min_notice_days) > 0 ||
-                  Number(policy.max_consecutive_days) > 0) && (
+                {Number(policy.min_notice_days) > 0 && (
                   <div className="mt-3 pt-3 border-t flex flex-wrap gap-2">
-                    {Number(policy.waiting_period_days) > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {policy.waiting_period_days} day waiting period
-                      </Badge>
-                    )}
-                    {Number(policy.min_notice_days) > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {policy.min_notice_days} day notice required
-                      </Badge>
-                    )}
-                    {Number(policy.max_consecutive_days) > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        Max {policy.max_consecutive_days} consecutive days
-                      </Badge>
-                    )}
+                    <Badge variant="outline" className="text-xs">
+                      {policy.min_notice_days} day notice required
+                    </Badge>
                   </div>
                 )}
               </CardContent>

@@ -16,13 +16,17 @@ export default async function TeamPage() {
   const supabase = await getCachedSupabase();
 
   // Parallel fetch all data
-  const [teamMembersResult, invitationsResult, departmentsResult] = await Promise.all([
-    // Get team members
+  const [teamMembersResult, invitationsResult, departmentsResult, positionsResult] = await Promise.all([
+    // Get team members with their positions
     supabase
       .from("profiles")
       .select(`
         *,
-        departments (id, name)
+        departments (id, name),
+        user_positions (
+          position_id,
+          positions (*)
+        )
       `)
       .eq("organization_id", profile.organization_id)
       .order("first_name"),
@@ -51,6 +55,12 @@ export default async function TeamPage() {
       .eq("organization_id", profile.organization_id)
       .eq("is_active", true)
       .order("name"),
+    // Get positions
+    supabase
+      .from("positions")
+      .select("*")
+      .eq("organization_id", profile.organization_id)
+      .order("sort_order"),
   ]);
 
   return (
@@ -62,6 +72,7 @@ export default async function TeamPage() {
           teamMembers={teamMembersResult.data || []}
           invitations={invitationsResult.data || []}
           departments={departmentsResult.data || []}
+          positions={positionsResult.data || []}
           isAdmin={isAdmin}
         />
       </div>

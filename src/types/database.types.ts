@@ -906,6 +906,42 @@ export type Database = {
           },
         ]
       }
+      user_positions: {
+        Row: {
+          id: string
+          user_id: string
+          position_id: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          position_id: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          position_id?: string
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_positions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_positions_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pto_balances: {
         Row: {
           adjustment_days: number | null
