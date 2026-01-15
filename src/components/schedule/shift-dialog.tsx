@@ -58,6 +58,8 @@ type TeamMember = {
   display_name: string | null;
   avatar_url: string | null;
   role: string | null;
+  user_positions?: { position_id: string }[];
+  user_locations?: { location_id: string }[];
 };
 
 type Location = { id: string; name: string };
@@ -124,6 +126,11 @@ export function ShiftDialog({
   const [seriesShiftCount, setSeriesShiftCount] = useState(0);
   const [deleteSeriesCount, setDeleteSeriesCount] = useState(0);
 
+  // Position assignment dialog state
+  const [showAssignPositionDialog, setShowAssignPositionDialog] = useState(false);
+  const [pendingPositionId, setPendingPositionId] = useState<string | null>(null);
+  const [assigningPosition, setAssigningPosition] = useState(false);
+
   const isEditing = !!shift;
   const isPartOfSeries = shift?.repeat_parent_id !== null && shift?.repeat_parent_id !== undefined;
 
@@ -144,6 +151,87 @@ export function ShiftDialog({
   // Get selected position's color
   const selectedPosition = positions.find((p) => p.id === formData.positionId);
   const positionColor = selectedPosition?.color || "blue";
+
+  // Get selected team member
+  const selectedTeamMember = teamMembers.find((m) => m.id === formData.userId);
+
+  // Get available locations for the selected user
+  const getAvailableLocations = (): Location[] => {
+    if (!formData.userId) return locations;
+    const member = teamMembers.find((m) => m.id === formData.userId);
+    if (!member?.user_locations || member.user_locations.length === 0) {
+      // If user has no assigned locations, show all locations
+      return locations;
+    }
+    // Filter locations to only those assigned to the user
+    const userLocationIds = member.user_locations.map((ul) => ul.location_id);
+    return locations.filter((loc) => userLocationIds.includes(loc.id));
+  };
+
+  const availableLocations = getAvailableLocations();
+
+  // Check if the selected team member has the selected position
+  const userHasPosition = (userId: string, positionId: string): boolean => {
+    const member = teamMembers.find((m) => m.id === userId);
+    if (!member?.user_positions) return false;
+    return member.user_positions.some((up) => up.position_id === positionId);
+  };
+
+  // Handle position selection with assignment check
+  const handlePositionChange = (positionId: string) => {
+    if (positionId && formData.userId && !userHasPosition(formData.userId, positionId)) {
+      // User doesn't have this position - show confirmation dialog
+      setPendingPositionId(positionId);
+      setShowAssignPositionDialog(true);
+    } else {
+      // User has the position or no user selected - just set it
+      setFormData((prev) => ({ ...prev, positionId }));
+    }
+  };
+
+  // Assign position to user and set it in form
+  const handleAssignPosition = async () => {
+    if (!pendingPositionId || !formData.userId) return;
+
+    setAssigningPosition(true);
+    try {
+      const { error } = await supabase
+        .from("user_positions")
+        .insert({
+          user_id: formData.userId,
+          position_id: pendingPositionId,
+        });
+
+      if (error) throw error;
+
+      // Update local team member data
+      const memberIndex = teamMembers.findIndex((m) => m.id === formData.userId);
+      if (memberIndex !== -1) {
+        const member = teamMembers[memberIndex];
+        if (!member.user_positions) {
+          member.user_positions = [];
+        }
+        member.user_positions.push({ position_id: pendingPositionId });
+      }
+
+      // Set the position in form
+      setFormData((prev) => ({ ...prev, positionId: pendingPositionId }));
+      toast.success("Position assigned to employee");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to assign position");
+    } finally {
+      setAssigningPosition(false);
+      setShowAssignPositionDialog(false);
+      setPendingPositionId(null);
+    }
+  };
+
+  // Cancel position assignment
+  const handleCancelAssignPosition = () => {
+    setShowAssignPositionDialog(false);
+    setPendingPositionId(null);
+  };
 
   // Repeat state
   const [repeatType, setRepeatType] = useState("none");
@@ -169,7 +257,7 @@ export function ShiftDialog({
           breakMinutes: shift.break_minutes || 0,
           locationId: shift.location_id || "",
           departmentId: shift.department_id || "",
-          positionId: "",
+          positionId: shift.position_id || "",
           notes: shift.notes || "",
           isPublished: shift.is_published || false,
         });
@@ -380,7 +468,7 @@ export function ShiftDialog({
         const startDateTime = setMinutes(setHours(baseDate, startHour), startMinute);
         const endDateTime = setMinutes(setHours(baseDate, endHour), endMinute);
 
-        const shiftData: any = {
+        const shiftData = {
           organization_id: organizationId,
           user_id: formData.userId,
           start_time: startDateTime.toISOString(),
@@ -388,17 +476,13 @@ export function ShiftDialog({
           break_minutes: formData.breakMinutes,
           location_id: formData.locationId || null,
           department_id: formData.departmentId || null,
-          position: formData.positionId ? selectedPosition?.name : null,
+          position_id: formData.positionId || null,
           notes: formData.notes || null,
           color: positionColor,
           is_published: formData.isPublished,
           status: formData.isPublished ? "published" : "draft",
           published_at: formData.isPublished ? new Date().toISOString() : null,
         };
-        // Only include position_id if it has a value (column may not exist in schema)
-        if (formData.positionId) {
-          shiftData.position_id = formData.positionId;
-        }
 
         // Update single shift
         const { error } = await supabase
@@ -438,7 +522,7 @@ export function ShiftDialog({
           const firstStartDateTime = setMinutes(setHours(firstDate, startHour), startMinute);
           const firstEndDateTime = setMinutes(setHours(firstDate, endHour), endMinute);
 
-          const firstShiftData: any = {
+          const firstShiftData = {
             organization_id: organizationId,
             user_id: formData.userId,
             start_time: firstStartDateTime.toISOString(),
@@ -446,7 +530,7 @@ export function ShiftDialog({
             break_minutes: formData.breakMinutes,
             location_id: formData.locationId || null,
             department_id: formData.departmentId || null,
-            position: formData.positionId ? selectedPosition?.name : null,
+            position_id: formData.positionId || null,
             notes: formData.notes || null,
             color: positionColor,
             is_published: formData.isPublished,
@@ -454,10 +538,6 @@ export function ShiftDialog({
             published_at: formData.isPublished ? new Date().toISOString() : null,
             repeat_parent_id: null,
           };
-          // Only include position_id if it has a value (column may not exist in schema)
-          if (formData.positionId) {
-            firstShiftData.position_id = formData.positionId;
-          }
 
           const { data: firstShift, error: firstError } = await supabase
             .from("shifts")
@@ -472,7 +552,7 @@ export function ShiftDialog({
             const startDateTime = setMinutes(setHours(date, startHour), startMinute);
             const endDateTime = setMinutes(setHours(date, endHour), endMinute);
 
-            const shiftData: any = {
+            return {
               organization_id: organizationId,
               user_id: formData.userId,
               start_time: startDateTime.toISOString(),
@@ -480,7 +560,7 @@ export function ShiftDialog({
               break_minutes: formData.breakMinutes,
               location_id: formData.locationId || null,
               department_id: formData.departmentId || null,
-              position: formData.positionId ? selectedPosition?.name : null,
+              position_id: formData.positionId || null,
               notes: formData.notes || null,
               color: positionColor,
               is_published: formData.isPublished,
@@ -488,11 +568,6 @@ export function ShiftDialog({
               published_at: formData.isPublished ? new Date().toISOString() : null,
               repeat_parent_id: firstShift.id,
             };
-            // Only include position_id if it has a value (column may not exist in schema)
-            if (formData.positionId) {
-              shiftData.position_id = formData.positionId;
-            }
-            return shiftData;
           });
 
           const { error: remainingError } = await supabase.from("shifts").insert(remainingShifts);
@@ -505,7 +580,7 @@ export function ShiftDialog({
           const startDateTime = setMinutes(setHours(singleDate, startHour), startMinute);
           const endDateTime = setMinutes(setHours(singleDate, endHour), endMinute);
 
-          const shiftData: any = {
+          const shiftData = {
             organization_id: organizationId,
             user_id: formData.userId,
             start_time: startDateTime.toISOString(),
@@ -513,17 +588,13 @@ export function ShiftDialog({
             break_minutes: formData.breakMinutes,
             location_id: formData.locationId || null,
             department_id: formData.departmentId || null,
-            position: formData.positionId ? selectedPosition?.name : null,
+            position_id: formData.positionId || null,
             notes: formData.notes || null,
             color: positionColor,
             is_published: formData.isPublished,
             status: formData.isPublished ? "published" : "draft",
             published_at: formData.isPublished ? new Date().toISOString() : null,
           };
-          // Only include position_id if it has a value (column may not exist in schema)
-          if (formData.positionId) {
-            shiftData.position_id = formData.positionId;
-          }
 
           const { error } = await supabase.from("shifts").insert(shiftData);
           if (error) throw error;
@@ -533,9 +604,9 @@ export function ShiftDialog({
 
       onOpenChange(false);
       router.refresh();
-    } catch (error) {
-      console.error(error);
-      toast.error(isEditing ? "Failed to update shift" : "Failed to create shift");
+    } catch (error: any) {
+      console.error("Shift error:", error?.message || error?.code || error);
+      toast.error(error?.message || (isEditing ? "Failed to update shift" : "Failed to create shift"));
     } finally {
       setLoading(false);
     }
@@ -633,9 +704,22 @@ export function ShiftDialog({
             </Label>
             <Select
               value={formData.userId}
-              onValueChange={(value) =>
-                setFormData((prev) => ({ ...prev, userId: value }))
-              }
+              onValueChange={(value) => {
+                // Check if the currently selected location is valid for the new user
+                const newMember = teamMembers.find((m) => m.id === value);
+                let newLocationId = formData.locationId;
+
+                if (newMember?.user_locations && newMember.user_locations.length > 0) {
+                  const userLocationIds = newMember.user_locations.map((ul) => ul.location_id);
+                  // Reset location if current selection is not available for this user
+                  if (!userLocationIds.includes(formData.locationId)) {
+                    // Auto-select first available location or clear
+                    newLocationId = userLocationIds[0] || "";
+                  }
+                }
+
+                setFormData((prev) => ({ ...prev, userId: value, locationId: newLocationId }));
+              }}
             >
               <SelectTrigger className="flex-1">
                 <SelectValue placeholder="Select employee" />
@@ -819,7 +903,7 @@ export function ShiftDialog({
           )}
 
           {/* Location */}
-          {locations.length > 0 && (
+          {availableLocations.length > 0 && (
             <div className="flex items-center gap-4">
               <Label htmlFor="locationId" className="w-24 text-right shrink-0">
                 Location
@@ -834,7 +918,7 @@ export function ShiftDialog({
                   <SelectValue placeholder="Select location" />
                 </SelectTrigger>
                 <SelectContent>
-                  {locations.map((location) => (
+                  {availableLocations.map((location) => (
                     <SelectItem key={location.id} value={location.id}>
                       {location.name}
                     </SelectItem>
@@ -878,9 +962,7 @@ export function ShiftDialog({
               </Label>
               <Select
                 value={formData.positionId}
-                onValueChange={(value) =>
-                  setFormData((prev) => ({ ...prev, positionId: value }))
-                }
+                onValueChange={handlePositionChange}
               >
                 <SelectTrigger className="flex-1">
                   <SelectValue placeholder="Select position" />
@@ -1062,6 +1144,36 @@ export function ShiftDialog({
                 Delete
               </AlertDialogAction>
             )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Position Assignment Confirmation Dialog */}
+      <AlertDialog open={showAssignPositionDialog} onOpenChange={setShowAssignPositionDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Assign Position</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedTeamMember && pendingPositionId && (
+                <>
+                  <strong>{selectedTeamMember.display_name || `${selectedTeamMember.first_name} ${selectedTeamMember.last_name}`}</strong>
+                  {" "}does not have the{" "}
+                  <strong>{positions.find(p => p.id === pendingPositionId)?.name}</strong>
+                  {" "}position assigned.
+                  <br /><br />
+                  Would you like to assign this position to them?
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelAssignPosition} disabled={assigningPosition}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleAssignPosition} disabled={assigningPosition}>
+              {assigningPosition && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Assign Position
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

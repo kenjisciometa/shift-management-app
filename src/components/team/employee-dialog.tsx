@@ -100,7 +100,7 @@ export function EmployeeDialog({
   });
 
   useEffect(() => {
-    if (employee) {
+    if (open && employee) {
       const currentPositionIds = employee.user_positions?.map(up => up.position_id) || [];
       setFormData({
         firstName: employee.first_name,
@@ -113,7 +113,7 @@ export function EmployeeDialog({
         positionIds: currentPositionIds,
       });
     }
-  }, [employee, open]);
+  }, [open, employee?.id]);
 
   const togglePosition = (positionId: string) => {
     setFormData((prev) => ({
@@ -263,14 +263,15 @@ export function EmployeeDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Edit Employee</DialogTitle>
             <DialogDescription>
               Update employee information and permissions
             </DialogDescription>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto pr-2">
           {/* Employee Info Header */}
           <div className="flex items-center gap-4 py-2">
             <Avatar className="h-16 w-16">
@@ -301,7 +302,7 @@ export function EmployeeDialog({
 
           <Separator />
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form id="employee-form" onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="firstName">First Name</Label>
@@ -355,16 +356,16 @@ export function EmployeeDialog({
             <div className="space-y-2">
               <Label htmlFor="department">Department</Label>
               <Select
-                value={formData.departmentId}
+                value={formData.departmentId || "none"}
                 onValueChange={(value) =>
-                  setFormData((prev) => ({ ...prev, departmentId: value }))
+                  setFormData((prev) => ({ ...prev, departmentId: value === "none" ? "" : value }))
                 }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select department" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">No department</SelectItem>
+                  <SelectItem value="none">No department</SelectItem>
                   {departments.map((dept) => (
                     <SelectItem key={dept.id} value={dept.id}>
                       {dept.name}
@@ -404,13 +405,12 @@ export function EmployeeDialog({
                 </div>
                 <div className="border rounded-md p-2 space-y-1 max-h-32 overflow-y-auto">
                   {positions.filter((p) => p.is_active).map((position) => (
-                    <div
+                    <label
                       key={position.id}
                       className={cn(
                         "flex items-center gap-2 p-2 rounded-md cursor-pointer hover:bg-muted transition-colors",
                         formData.positionIds.includes(position.id) && "bg-muted"
                       )}
-                      onClick={() => togglePosition(position.id)}
                     >
                       <Checkbox
                         checked={formData.positionIds.includes(position.id)}
@@ -423,7 +423,7 @@ export function EmployeeDialog({
                         )}
                       />
                       <span className="text-sm">{position.name}</span>
-                    </div>
+                    </label>
                   ))}
                   {positions.filter((p) => p.is_active).length === 0 && (
                     <p className="text-sm text-muted-foreground p-2">
@@ -508,46 +508,47 @@ export function EmployeeDialog({
                 </SelectContent>
               </Select>
             </div>
+          </form>
+          </div>
 
-            <DialogFooter className="flex justify-between sm:justify-between">
-              <div>
-                {employee.status === "active" ? (
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    onClick={() => setConfirmDeactivate(true)}
-                    disabled={loading}
-                  >
-                    Deactivate Account
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleReactivate}
-                    disabled={loading}
-                  >
-                    {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                    Reactivate Account
-                  </Button>
-                )}
-              </div>
-              <div className="flex gap-2">
+          <DialogFooter className="flex justify-between sm:justify-between flex-shrink-0 pt-4 border-t">
+            <div>
+              {employee.status === "active" ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => setConfirmDeactivate(true)}
+                  disabled={loading}
+                >
+                  Deactivate Account
+                </Button>
+              ) : (
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => onOpenChange(false)}
+                  onClick={handleReactivate}
                   disabled={loading}
                 >
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={loading}>
                   {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Save Changes
+                  Reactivate Account
                 </Button>
-              </div>
-            </DialogFooter>
-          </form>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" form="employee-form" disabled={loading}>
+                {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Save Changes
+              </Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -559,22 +560,23 @@ export function EmployeeDialog({
               <AlertTriangle className="h-5 w-5 text-destructive" />
               Deactivate Employee Account
             </AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to deactivate{" "}
-              <strong>
-                {employee.display_name || `${employee.first_name} ${employee.last_name}`}
-              </strong>
-              &apos;s account?
-              <br />
-              <br />
-              This will:
-              <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>Prevent them from logging in</li>
-                <li>Remove them from future shift schedules</li>
-                <li>Cancel any pending PTO requests</li>
-              </ul>
-              <br />
-              You can reactivate the account later if needed.
+            <AlertDialogDescription asChild>
+              <div>
+                <p>
+                  Are you sure you want to deactivate{" "}
+                  <strong>
+                    {employee.display_name || `${employee.first_name} ${employee.last_name}`}
+                  </strong>
+                  &apos;s account?
+                </p>
+                <p className="mt-2">This will:</p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Prevent them from logging in</li>
+                  <li>Remove them from future shift schedules</li>
+                  <li>Cancel any pending PTO requests</li>
+                </ul>
+                <p className="mt-2">You can reactivate the account later if needed.</p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -82,6 +82,7 @@ type Shift = Database["public"]["Tables"]["shifts"]["Row"] & {
   } | null;
   locations: { id: string; name: string } | null;
   departments: { id: string; name: string } | null;
+  positions: { id: string; name: string; color: string } | null;
 };
 
 type TeamMember = {
@@ -153,7 +154,7 @@ export function ScheduleCalendar({
   const [selectedTemplate, setSelectedTemplate] = useState<ShiftTemplate | null>(null);
 
   // Filter states
-  const [filterLocation, setFilterLocation] = useState<string | null>(null);
+  const [filterLocations, setFilterLocations] = useState<string[]>([]);
   const [filterPosition, setFilterPosition] = useState<string | null>(null);
   const [filterMember, setFilterMember] = useState<string | null>(null);
   const [filterEvent, setFilterEvent] = useState<string | null>(null);
@@ -163,7 +164,7 @@ export function ScheduleCalendar({
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
 
   const clearFilters = () => {
-    setFilterLocation(null);
+    setFilterLocations([]);
     setFilterPosition(null);
     setFilterMember(null);
     setFilterEvent(null);
@@ -242,7 +243,7 @@ export function ScheduleCalendar({
             department_id: shift.department_id,
             start_time: newStart.toISOString(),
             end_time: newEnd.toISOString(),
-            position: shift.position,
+            position_id: shift.position_id,
             notes: shift.notes,
             color: shift.color,
             is_published: false, // Copied shifts are drafts by default
@@ -286,8 +287,8 @@ export function ScheduleCalendar({
 
   // Apply filters to shifts
   const filteredShifts = shifts.filter((shift) => {
-    if (filterLocation && shift.location_id !== filterLocation) return false;
-    if (filterPosition && shift.position !== filterPosition) return false;
+    if (filterLocations.length > 0 && (!shift.location_id || !filterLocations.includes(shift.location_id))) return false;
+    if (filterPosition && shift.position_id !== filterPosition) return false;
     if (filterMember && shift.user_id !== filterMember) return false;
     // Event filter can be expanded later for different event types
     return true;
@@ -595,11 +596,11 @@ export function ScheduleCalendar({
           locations={locations}
           positions={positions}
           teamMembers={teamMembers}
-          selectedLocation={filterLocation}
+          selectedLocations={filterLocations}
           selectedPosition={filterPosition}
           selectedMember={filterMember}
           selectedEvent={filterEvent}
-          onLocationChange={setFilterLocation}
+          onLocationsChange={setFilterLocations}
           onPositionChange={setFilterPosition}
           onMemberChange={setFilterMember}
           onEventChange={setFilterEvent}
@@ -999,7 +1000,13 @@ function DayView({
     shift: Shift;
     newStartTime: Date;
     newEndTime: Date;
+    type: 'move' | 'resize-start' | 'resize-end';
   } | null>(null);
+
+  // Resize state
+  const [resizingShift, setResizingShift] = useState<Shift | null>(null);
+  const [resizeEdge, setResizeEdge] = useState<'start' | 'end' | null>(null);
+  const [resizeOffset, setResizeOffset] = useState<number>(0); // in hours
 
   const containerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const justFinishedDragging = useRef(false);
@@ -1013,12 +1020,17 @@ function DayView({
     return `${member.first_name} ${member.last_name}`;
   };
 
-  const getShiftPosition = useCallback((shift: Shift, offsetHours: number = 0) => {
+  const getShiftPosition = useCallback((
+    shift: Shift,
+    offsetHours: number = 0,
+    startOffset: number = 0,
+    endOffset: number = 0
+  ) => {
     const startTime = parseISO(shift.start_time);
     const endTime = parseISO(shift.end_time);
 
-    let startHour = startTime.getHours() + startTime.getMinutes() / 60 + offsetHours;
-    let endHour = endTime.getHours() + endTime.getMinutes() / 60 + offsetHours;
+    let startHour = startTime.getHours() + startTime.getMinutes() / 60 + offsetHours + startOffset;
+    let endHour = endTime.getHours() + endTime.getMinutes() / 60 + offsetHours + endOffset;
 
     // Handle overnight shifts
     if (endHour < startHour) {
@@ -1064,6 +1076,18 @@ function DayView({
       orange: {
         published: "bg-orange-500 border-orange-600 text-white",
         draft: "bg-white border-2 border-dashed border-orange-400 text-orange-600",
+      },
+      cyan: {
+        published: "bg-cyan-500 border-cyan-600 text-white",
+        draft: "bg-white border-2 border-dashed border-cyan-400 text-cyan-600",
+      },
+      indigo: {
+        published: "bg-indigo-500 border-indigo-600 text-white",
+        draft: "bg-white border-2 border-dashed border-indigo-400 text-indigo-600",
+      },
+      teal: {
+        published: "bg-teal-500 border-teal-600 text-white",
+        draft: "bg-white border-2 border-dashed border-teal-400 text-teal-600",
       },
       default: {
         published: "bg-slate-500 border-slate-600 text-white",
@@ -1127,12 +1151,109 @@ function DayView({
             shift,
             newStartTime,
             newEndTime,
+            type: 'move',
           });
         }
       }
 
       setDraggingShift(null);
       setDragOffset(0);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, [isAdmin]);
+
+  // Resize handler for shift edges
+  const handleResizeMouseDown = useCallback((
+    e: React.MouseEvent,
+    shift: Shift,
+    memberId: string,
+    edge: 'start' | 'end'
+  ) => {
+    if (!isAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const container = containerRefs.current.get(memberId);
+    if (!container) return;
+
+    setResizingShift(shift);
+    setResizeEdge(edge);
+    setResizeOffset(0);
+
+    let currentResizeOffset = 0;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const containerWidth = rect.width;
+      const startX = e.clientX;
+      const currentX = moveEvent.clientX;
+      const deltaX = currentX - startX;
+      const deltaHours = (deltaX / containerWidth) * totalHours;
+
+      // Round to nearest 15 minutes (0.25 hours)
+      const roundedDeltaHours = Math.round(deltaHours * 4) / 4;
+
+      // Get current shift times
+      const startTime = parseISO(shift.start_time);
+      const endTime = parseISO(shift.end_time);
+      const startHour = startTime.getHours() + startTime.getMinutes() / 60;
+      const endHour = endTime.getHours() + endTime.getMinutes() / 60;
+      const duration = endHour - startHour;
+
+      // Apply constraints
+      if (edge === 'start') {
+        // Moving start: ensure new start >= 6 and new start < end (min 15min shift)
+        const newStartHour = startHour + roundedDeltaHours;
+        if (newStartHour >= 6 && newStartHour < endHour - 0.25) {
+          currentResizeOffset = roundedDeltaHours;
+          setResizeOffset(roundedDeltaHours);
+        }
+      } else {
+        // Moving end: ensure new end <= 24 and new end > start (min 15min shift)
+        const newEndHour = endHour + roundedDeltaHours;
+        if (newEndHour <= 24 && newEndHour > startHour + 0.25) {
+          currentResizeOffset = roundedDeltaHours;
+          setResizeOffset(roundedDeltaHours);
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+
+      // Set flag to prevent click from opening Create Shift
+      justFinishedDragging.current = true;
+      setTimeout(() => {
+        justFinishedDragging.current = false;
+      }, 100);
+
+      if (currentResizeOffset !== 0) {
+        const originalStart = parseISO(shift.start_time);
+        const originalEnd = parseISO(shift.end_time);
+
+        let newStartTime = originalStart;
+        let newEndTime = originalEnd;
+
+        if (edge === 'start') {
+          newStartTime = new Date(originalStart.getTime() + currentResizeOffset * 60 * 60 * 1000);
+        } else {
+          newEndTime = new Date(originalEnd.getTime() + currentResizeOffset * 60 * 60 * 1000);
+        }
+
+        setPendingUpdate({
+          shift,
+          newStartTime,
+          newEndTime,
+          type: edge === 'start' ? 'resize-start' : 'resize-end',
+        });
+      }
+
+      setResizingShift(null);
+      setResizeEdge(null);
+      setResizeOffset(0);
     };
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -1212,29 +1333,54 @@ function DayView({
                   {/* Shift bars */}
                   {memberShifts.map((shift) => {
                     const isDragging = draggingShift?.id === shift.id;
-                    const position = getShiftPosition(shift, isDragging ? dragOffset : 0);
+                    const isResizing = resizingShift?.id === shift.id;
                     const startTime = parseISO(shift.start_time);
                     const endTime = parseISO(shift.end_time);
 
-                    // Calculate display times for dragging
-                    const displayStartTime = isDragging
-                      ? new Date(startTime.getTime() + dragOffset * 60 * 60 * 1000)
-                      : startTime;
-                    const displayEndTime = isDragging
-                      ? new Date(endTime.getTime() + dragOffset * 60 * 60 * 1000)
-                      : endTime;
+                    // Calculate position with offsets
+                    const startOffset = isResizing && resizeEdge === 'start' ? resizeOffset : 0;
+                    const endOffset = isResizing && resizeEdge === 'end' ? resizeOffset : 0;
+                    const position = getShiftPosition(
+                      shift,
+                      isDragging ? dragOffset : 0,
+                      startOffset,
+                      endOffset
+                    );
+
+                    // Calculate display times for dragging/resizing
+                    let displayStartTime = startTime;
+                    let displayEndTime = endTime;
+
+                    if (isDragging) {
+                      displayStartTime = new Date(startTime.getTime() + dragOffset * 60 * 60 * 1000);
+                      displayEndTime = new Date(endTime.getTime() + dragOffset * 60 * 60 * 1000);
+                    } else if (isResizing) {
+                      if (resizeEdge === 'start') {
+                        displayStartTime = new Date(startTime.getTime() + resizeOffset * 60 * 60 * 1000);
+                      } else {
+                        displayEndTime = new Date(endTime.getTime() + resizeOffset * 60 * 60 * 1000);
+                      }
+                    }
 
                     return (
                       <div
                         key={shift.id}
                         className={cn(
-                          "absolute top-1 bottom-1 rounded flex items-center text-xs overflow-hidden border select-none",
+                          "absolute top-1 bottom-1 rounded flex items-center text-xs overflow-hidden border select-none group",
                           getColorClass(shift.color, shift.is_published ?? false),
                           selectedShiftIds.has(shift.id) && "ring-2 ring-primary",
-                          isDragging && "opacity-80 shadow-lg z-10"
+                          (isDragging || isResizing) && "opacity-80 shadow-lg z-10"
                         )}
                         style={{ left: position.left, width: position.width }}
                       >
+                        {/* Left resize handle */}
+                        {isAdmin && (
+                          <div
+                            className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black/20 z-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onMouseDown={(e) => handleResizeMouseDown(e, shift, member.id, 'start')}
+                          />
+                        )}
+
                         {/* Drag handle */}
                         {isAdmin && (
                           <div
@@ -1246,14 +1392,30 @@ function DayView({
                         )}
                         {/* Clickable content */}
                         <div
-                          className="flex-1 truncate px-1 cursor-pointer"
+                          className="flex-1 truncate px-1 cursor-pointer min-w-0"
                           onClick={(e) => {
                             e.stopPropagation();
                             onEditShift(shift);
                           }}
                         >
-                          {format(displayStartTime, "h:mm")} - {format(displayEndTime, "h:mm a")}
+                          <div className="opacity-80">
+                            {format(displayStartTime, "h:mm")} - {format(displayEndTime, "h:mm a")}
+                          </div>
+                          {shift.positions && (
+                            <div className="opacity-80 truncate">{shift.positions.name}</div>
+                          )}
+                          <div className="font-medium truncate">
+                            {shift.profiles?.display_name || `${shift.profiles?.first_name} ${shift.profiles?.last_name}`}
+                          </div>
                         </div>
+
+                        {/* Right resize handle */}
+                        {isAdmin && (
+                          <div
+                            className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize hover:bg-black/20 z-20 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onMouseDown={(e) => handleResizeMouseDown(e, shift, member.id, 'end')}
+                          />
+                        )}
                       </div>
                     );
                   })}
@@ -1268,23 +1430,68 @@ function DayView({
       <AlertDialog open={!!pendingUpdate} onOpenChange={(open) => !open && handleCancelUpdate()}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Time Change</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingUpdate && (
-                <>
-                  Change shift time from{" "}
-                  <strong>
-                    {format(parseISO(pendingUpdate.shift.start_time), "h:mm a")} -{" "}
-                    {format(parseISO(pendingUpdate.shift.end_time), "h:mm a")}
-                  </strong>{" "}
-                  to{" "}
-                  <strong>
-                    {format(pendingUpdate.newStartTime, "h:mm a")} -{" "}
-                    {format(pendingUpdate.newEndTime, "h:mm a")}
-                  </strong>
-                  ?
-                </>
-              )}
+            <AlertDialogTitle>
+              {pendingUpdate?.type === 'move' ? 'Confirm Time Change' : 'Confirm Duration Change'}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                {pendingUpdate && (
+                  <>
+                    {pendingUpdate.type === 'move' ? (
+                      <p>
+                        Move shift from{" "}
+                        <strong>
+                          {format(parseISO(pendingUpdate.shift.start_time), "h:mm a")} -{" "}
+                          {format(parseISO(pendingUpdate.shift.end_time), "h:mm a")}
+                        </strong>{" "}
+                        to{" "}
+                        <strong>
+                          {format(pendingUpdate.newStartTime, "h:mm a")} -{" "}
+                          {format(pendingUpdate.newEndTime, "h:mm a")}
+                        </strong>
+                        ?
+                      </p>
+                    ) : (
+                      <>
+                        <p>
+                          {pendingUpdate.type === 'resize-start' ? 'Change start time' : 'Change end time'} from{" "}
+                          <strong>
+                            {format(parseISO(pendingUpdate.shift.start_time), "h:mm a")} -{" "}
+                            {format(parseISO(pendingUpdate.shift.end_time), "h:mm a")}
+                          </strong>{" "}
+                          to{" "}
+                          <strong>
+                            {format(pendingUpdate.newStartTime, "h:mm a")} -{" "}
+                            {format(pendingUpdate.newEndTime, "h:mm a")}
+                          </strong>
+                          ?
+                        </p>
+                        <p className="mt-2 text-sm">
+                          Duration:{" "}
+                          {(() => {
+                            const oldStart = parseISO(pendingUpdate.shift.start_time);
+                            const oldEnd = parseISO(pendingUpdate.shift.end_time);
+                            const oldDuration = (oldEnd.getTime() - oldStart.getTime()) / (1000 * 60 * 60);
+                            const newDuration = (pendingUpdate.newEndTime.getTime() - pendingUpdate.newStartTime.getTime()) / (1000 * 60 * 60);
+                            const formatDuration = (hours: number) => {
+                              const h = Math.floor(hours);
+                              const m = Math.round((hours - h) * 60);
+                              return m > 0 ? `${h}h ${m}m` : `${h}h`;
+                            };
+                            return (
+                              <>
+                                <span className="line-through opacity-60">{formatDuration(oldDuration)}</span>
+                                {" → "}
+                                <strong>{formatDuration(newDuration)}</strong>
+                              </>
+                            );
+                          })()}
+                        </p>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

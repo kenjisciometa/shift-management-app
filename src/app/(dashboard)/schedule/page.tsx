@@ -59,7 +59,8 @@ export default async function SchedulePage({
           *,
           profiles!shifts_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
           locations (id, name),
-          departments (id, name)
+          departments (id, name),
+          positions (id, name, color)
         `)
         .eq("organization_id", profile.organization_id)
         .gte("start_time", startDate.toISOString())
@@ -72,10 +73,18 @@ export default async function SchedulePage({
 
       return query;
     })(),
-    // Get team members
+    // Get team members with their positions and locations
     supabase
       .from("profiles")
-      .select("id, first_name, last_name, display_name, avatar_url, role")
+      .select(`
+        id, first_name, last_name, display_name, avatar_url, role,
+        user_positions (
+          position_id
+        ),
+        user_locations (
+          location_id
+        )
+      `)
       .eq("organization_id", profile.organization_id)
       .eq("status", "active")
       .order("first_name", { ascending: true }),

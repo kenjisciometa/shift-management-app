@@ -427,7 +427,7 @@ export function PTOBalanceInitializeDialog({
                                 {member.role}
                               </div>
                             </div>
-                            <Checkbox checked={isSelected} readOnly />
+                            <Checkbox checked={isSelected} />
                           </div>
                         );
                       })

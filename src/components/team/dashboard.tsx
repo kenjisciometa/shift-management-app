@@ -23,7 +23,32 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Plus,
   Search,
@@ -39,10 +64,15 @@ import {
   UsersRound,
   DollarSign,
   Settings,
+  Filter,
+  X,
+  AlertTriangle,
 } from "lucide-react";
 import { InviteDialog } from "./invite-dialog";
 import { EmployeeDialog } from "./employee-dialog";
 import { PositionDialog } from "@/components/organization/position-dialog";
+import { LocationDialog } from "@/components/organization/location-dialog";
+import { cn } from "@/lib/utils";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
@@ -67,6 +97,7 @@ type Department = {
 };
 
 type Position = Database["public"]["Tables"]["positions"]["Row"];
+type Location = Database["public"]["Tables"]["locations"]["Row"];
 
 interface TeamDashboardProps {
   profile: Profile;
@@ -74,6 +105,7 @@ interface TeamDashboardProps {
   invitations: Invitation[];
   departments: Department[];
   positions: Position[];
+  locations: Location[];
   isAdmin: boolean;
 }
 
@@ -96,6 +128,7 @@ export function TeamDashboard({
   invitations,
   departments,
   positions,
+  locations,
   isAdmin,
 }: TeamDashboardProps) {
   const router = useRouter();
@@ -105,16 +138,83 @@ export function TeamDashboard({
   const [selectedEmployee, setSelectedEmployee] = useState<TeamMember | null>(null);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
+  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  // Filter team members
-  const filteredMembers = teamMembers.filter((member) => {
-    if (!searchQuery) return true;
-    const name = getDisplayName(member).toLowerCase();
-    const email = member.email?.toLowerCase() || "";
-    return name.includes(searchQuery.toLowerCase()) || email.includes(searchQuery.toLowerCase());
-  });
+  // Deactivation dialog state
+  const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
+  const [memberToDeactivate, setMemberToDeactivate] = useState<TeamMember | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
+
+  // Filter states
+  const [filterRole, setFilterRole] = useState<string>("all");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterDepartment, setFilterDepartment] = useState<string>("all");
+  const [filterPosition, setFilterPosition] = useState<string>("all");
+
+  // Check if any filters are active
+  const hasActiveFilters = filterRole !== "all" || filterStatus !== "all" || filterDepartment !== "all" || filterPosition !== "all";
+
+  // Clear all filters
+  const clearFilters = () => {
+    setFilterRole("all");
+    setFilterStatus("all");
+    setFilterDepartment("all");
+    setFilterPosition("all");
+  };
+
+  // Role priority for sorting (lower = higher priority)
+  const rolePriority: Record<string, number> = {
+    owner: 0,
+    admin: 1,
+    manager: 2,
+    employee: 3,
+  };
+
+  // Filter and sort team members
+  const filteredMembers = teamMembers
+    .filter((member) => {
+      // Search filter
+      if (searchQuery) {
+        const name = getDisplayName(member).toLowerCase();
+        const email = member.email?.toLowerCase() || "";
+        if (!name.includes(searchQuery.toLowerCase()) && !email.includes(searchQuery.toLowerCase())) {
+          return false;
+        }
+      }
+      // Role filter
+      if (filterRole !== "all" && member.role !== filterRole) {
+        return false;
+      }
+      // Status filter
+      if (filterStatus !== "all" && member.status !== filterStatus) {
+        return false;
+      }
+      // Department filter
+      if (filterDepartment !== "all" && member.department_id !== filterDepartment) {
+        return false;
+      }
+      // Position filter
+      if (filterPosition !== "all") {
+        const hasPosition = member.user_positions?.some(up => up.position_id === filterPosition);
+        if (!hasPosition) {
+          return false;
+        }
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      // Sort by role priority (owner first, then admin, manager, employee)
+      const priorityA = rolePriority[a.role || "employee"] ?? 3;
+      const priorityB = rolePriority[b.role || "employee"] ?? 3;
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+      // Then sort by name
+      return getDisplayName(a).localeCompare(getDisplayName(b));
+    });
 
   function getDisplayName(member: TeamMember) {
     if (member.display_name) return member.display_name;
@@ -194,27 +294,72 @@ export function TeamDashboard({
     }
   };
 
+  const handleDeleteLocation = async (locationId: string) => {
+    setProcessingId(locationId);
+    try {
+      const { error } = await supabase
+        .from("locations")
+        .delete()
+        .eq("id", locationId);
+
+      if (error) throw error;
+
+      toast.success("Location deleted");
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete location");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleDeactivateMember = async () => {
+    if (!memberToDeactivate) return;
+
+    setDeactivating(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ status: "inactive" })
+        .eq("id", memberToDeactivate.id);
+
+      if (error) throw error;
+
+      toast.success("Member deactivated successfully");
+      setDeactivateDialogOpen(false);
+      setMemberToDeactivate(null);
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to deactivate member");
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  const handleActivateMember = async (member: TeamMember) => {
+    setProcessingId(member.id);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ status: "active" })
+        .eq("id", member.id);
+
+      if (error) throw error;
+
+      toast.success("Member activated successfully");
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to activate member");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Actions */}
-      <div className="flex items-center gap-4">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search team members..."
-            className="pl-9"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        {isAdmin && (
-          <Button onClick={() => setInviteDialogOpen(true)}>
-            <UserPlus className="h-4 w-4 mr-2" />
-            Invite Member
-          </Button>
-        )}
-      </div>
-
       {/* Tabs */}
       <Tabs defaultValue="members">
         <TabsList className="flex-wrap h-auto gap-1">
@@ -235,46 +380,158 @@ export function TeamDashboard({
           )}
         </TabsList>
 
-        <TabsContent value="members" className="mt-4">
+        <TabsContent value="members" className="mt-4 space-y-4">
+          {/* Search and Filters */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by name or email..."
+                  className="pl-9"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              {isAdmin && (
+                <Button onClick={() => setInviteDialogOpen(true)}>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Invite Member
+                </Button>
+              )}
+            </div>
+
+            {/* Filters */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Filter className="h-4 w-4" />
+                <span>Filters:</span>
+              </div>
+              <Select value={filterRole} onValueChange={setFilterRole}>
+                <SelectTrigger className={cn("w-[130px] h-9", filterRole !== "all" && "bg-green-100")}>
+                  <SelectValue placeholder="Role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Roles</SelectItem>
+                  <SelectItem value="owner">Owner</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="employee">Employee</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className={cn("w-[130px] h-9", filterStatus !== "all" && "bg-green-100")}>
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="suspended">Suspended</SelectItem>
+                </SelectContent>
+              </Select>
+              {departments.length > 0 && (
+                <Select value={filterDepartment} onValueChange={setFilterDepartment}>
+                  <SelectTrigger className={cn("w-[150px] h-9", filterDepartment !== "all" && "bg-green-100")}>
+                    <SelectValue placeholder="Department" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Departments</SelectItem>
+                    {departments.map((dept) => (
+                      <SelectItem key={dept.id} value={dept.id}>
+                        {dept.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {positions.length > 0 && (
+                <Select value={filterPosition} onValueChange={setFilterPosition}>
+                  <SelectTrigger className={cn("w-[150px] h-9", filterPosition !== "all" && "bg-green-100")}>
+                    <SelectValue placeholder="Position" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Positions</SelectItem>
+                    {positions.filter(p => p.is_active).map((pos) => (
+                      <SelectItem key={pos.id} value={pos.id}>
+                        {pos.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {hasActiveFilters && (
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-9">
+                  <X className="h-4 w-4 mr-1" />
+                  Clear
+                </Button>
+              )}
+              <div className="ml-auto text-sm text-muted-foreground">
+                {filteredMembers.length} of {teamMembers.length} members
+              </div>
+            </div>
+          </div>
+
+          {/* Team Members Table */}
           {filteredMembers.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredMembers.map((member) => (
-                <Card key={member.id} className="group">
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-4">
-                      <Avatar className="h-12 w-12">
-                        <AvatarImage src={member.avatar_url || undefined} />
-                        <AvatarFallback>{getInitials(member)}</AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium truncate">
-                            {getDisplayName(member)}
-                          </h3>
-                          {member.id === profile.id && (
-                            <Badge variant="outline" className="text-xs">
-                              You
-                            </Badge>
-                          )}
+            <div className="border rounded-lg">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[300px]">Member</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Positions</TableHead>
+                    {isAdmin && <TableHead className="w-[50px]"></TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredMembers.map((member) => (
+                    <TableRow key={member.id} className="group">
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-9 w-9">
+                            <AvatarImage src={member.avatar_url || undefined} />
+                            <AvatarFallback className="text-xs">{getInitials(member)}</AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium truncate">
+                                {getDisplayName(member)}
+                              </span>
+                              {member.id === profile.id && (
+                                <Badge variant="outline" className="text-xs">
+                                  You
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm text-muted-foreground truncate">
+                              {member.email}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-sm text-muted-foreground truncate">
-                          {member.email}
-                        </p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <Badge className={roleColors[member.role || "employee"]}>
-                            {member.role}
-                          </Badge>
-                          <Badge className={statusColors[member.status || "active"]}>
-                            {member.status}
-                          </Badge>
-                        </div>
-                        {member.departments && (
-                          <p className="text-xs text-muted-foreground mt-2">
-                            {member.departments.name}
-                          </p>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={roleColors[member.role || "employee"]}>
+                          {member.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={statusColors[member.status || "active"]}>
+                          {member.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {member.departments ? (
+                          <span className="text-sm">{member.departments.name}</span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
                         )}
-                        {member.user_positions && member.user_positions.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
+                      </TableCell>
+                      <TableCell>
+                        {member.user_positions && member.user_positions.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
                             {member.user_positions.map((up) => {
                               if (!up.positions) return null;
                               const pos = up.positions;
@@ -315,60 +572,76 @@ export function TeamDashboard({
                               );
                             })}
                           </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
                         )}
-                      </div>
-                      {isAdmin && member.id !== profile.id && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 opacity-0 group-hover:opacity-100"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setSelectedEmployee(member);
-                                setEmployeeDialogOpen(true);
-                              }}
-                            >
-                              View Profile
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setSelectedEmployee(member);
-                                setEmployeeDialogOpen(true);
-                              }}
-                            >
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => {
-                                setSelectedEmployee(member);
-                                setEmployeeDialogOpen(true);
-                              }}
-                            >
-                              {member.status === "active" ? "Deactivate" : "Manage Status"}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                      </TableCell>
+                      {isAdmin && (
+                        <TableCell>
+                          {member.id !== profile.id && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                                  disabled={processingId === member.id}
+                                >
+                                  {processingId === member.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setSelectedEmployee(member);
+                                    setEmployeeDialogOpen(true);
+                                  }}
+                                >
+                                  Edit
+                                </DropdownMenuItem>
+                                {member.status === "active" ? (
+                                  <DropdownMenuItem
+                                    className="text-destructive"
+                                    onClick={() => {
+                                      setMemberToDeactivate(member);
+                                      setDeactivateDialogOpen(true);
+                                    }}
+                                  >
+                                    Deactivate
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem
+                                    onClick={() => handleActivateMember(member)}
+                                  >
+                                    Activate
+                                  </DropdownMenuItem>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </TableCell>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-10">
                 <Users className="h-12 w-12 text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">
-                  {searchQuery ? "No team members found" : "No team members yet"}
+                  {searchQuery || hasActiveFilters ? "No team members found matching filters" : "No team members yet"}
                 </p>
+                {hasActiveFilters && (
+                  <Button variant="link" onClick={clearFilters}>
+                    Clear filters
+                  </Button>
+                )}
               </CardContent>
             </Card>
           )}
@@ -573,20 +846,100 @@ export function TeamDashboard({
                   Manage work locations for geofencing and time tracking
                 </p>
               </div>
-              <Button>
+              <Button
+                onClick={() => {
+                  setSelectedLocation(null);
+                  setLocationDialogOpen(true);
+                }}
+              >
                 <Plus className="h-4 w-4 mr-2" />
                 Add Location
               </Button>
             </div>
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-10">
-                <MapPin className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground">No locations configured</p>
-                <Button variant="link">
-                  Add your first location
-                </Button>
-              </CardContent>
-            </Card>
+
+            {locations.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {locations.map((location) => (
+                  <Card key={location.id} className="group">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-3">
+                          <div className="h-10 w-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                            <MapPin className="h-5 w-5 text-white" />
+                          </div>
+                          <div>
+                            <h3 className="font-medium">{location.name}</h3>
+                            {location.address && (
+                              <p className="text-sm text-muted-foreground">
+                                {location.address}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 mt-2">
+                              <Badge variant={location.is_active ? "default" : "secondary"}>
+                                {location.is_active ? "Active" : "Inactive"}
+                              </Badge>
+                              {location.geofence_enabled && (
+                                <Badge variant="outline">
+                                  Geofence: {location.radius_meters}m
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                              disabled={processingId === location.id}
+                            >
+                              {processingId === location.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <MoreHorizontal className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedLocation(location);
+                                setLocationDialogOpen(true);
+                              }}
+                            >
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => handleDeleteLocation(location.id)}
+                            >
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-10">
+                  <MapPin className="h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">No locations configured</p>
+                  <Button
+                    variant="link"
+                    onClick={() => {
+                      setSelectedLocation(null);
+                      setLocationDialogOpen(true);
+                    }}
+                  >
+                    Add your first location
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
         )}
 
@@ -758,6 +1111,55 @@ export function TeamDashboard({
         position={selectedPosition}
         organizationId={profile.organization_id}
       />
+
+      {/* Location Dialog */}
+      <LocationDialog
+        open={locationDialogOpen}
+        onOpenChange={setLocationDialogOpen}
+        location={selectedLocation}
+        organizationId={profile.organization_id}
+      />
+
+      {/* Deactivation Confirmation Dialog */}
+      <AlertDialog open={deactivateDialogOpen} onOpenChange={setDeactivateDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Deactivate Member
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-sm text-muted-foreground">
+                <p>
+                  Are you sure you want to deactivate{" "}
+                  <strong>
+                    {memberToDeactivate?.display_name ||
+                      `${memberToDeactivate?.first_name} ${memberToDeactivate?.last_name}`}
+                  </strong>
+                  ?
+                </p>
+                <p className="mt-2">This will:</p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Prevent them from logging in</li>
+                  <li>Remove them from future shift schedules</li>
+                </ul>
+                <p className="mt-2">You can reactivate the account later if needed.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deactivating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeactivateMember}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deactivating}
+            >
+              {deactivating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Deactivate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

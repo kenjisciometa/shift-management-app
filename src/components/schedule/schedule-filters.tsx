@@ -1,6 +1,6 @@
 "use client";
 
-import { Filter, Send, Copy, Trash2, X } from "lucide-react";
+import { Filter, Send, Copy, Trash2, X, ChevronDown, MapPin } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -8,8 +8,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 type Location = { id: string; name: string };
 type Position = { id: string; name: string };
@@ -24,11 +32,11 @@ interface ScheduleFiltersProps {
   locations: Location[];
   positions: Position[];
   teamMembers: TeamMember[];
-  selectedLocation: string | null;
+  selectedLocations: string[];
   selectedPosition: string | null;
   selectedMember: string | null;
   selectedEvent: string | null;
-  onLocationChange: (value: string | null) => void;
+  onLocationsChange: (value: string[]) => void;
   onPositionChange: (value: string | null) => void;
   onMemberChange: (value: string | null) => void;
   onEventChange: (value: string | null) => void;
@@ -51,11 +59,11 @@ export function ScheduleFilters({
   locations,
   positions,
   teamMembers,
-  selectedLocation,
+  selectedLocations,
   selectedPosition,
   selectedMember,
   selectedEvent,
-  onLocationChange,
+  onLocationsChange,
   onPositionChange,
   onMemberChange,
   onEventChange,
@@ -67,7 +75,24 @@ export function ScheduleFilters({
   onClearSelection,
 }: ScheduleFiltersProps) {
   const hasActiveFilters =
-    selectedLocation || selectedPosition || selectedMember || selectedEvent;
+    selectedLocations.length > 0 || selectedPosition || selectedMember || selectedEvent;
+
+  const toggleLocation = (locationId: string) => {
+    if (selectedLocations.includes(locationId)) {
+      onLocationsChange(selectedLocations.filter((id) => id !== locationId));
+    } else {
+      onLocationsChange([...selectedLocations, locationId]);
+    }
+  };
+
+  const getLocationLabel = () => {
+    if (selectedLocations.length === 0) return "All Locations";
+    if (selectedLocations.length === 1) {
+      const loc = locations.find((l) => l.id === selectedLocations[0]);
+      return loc?.name || "1 Location";
+    }
+    return `${selectedLocations.length} Locations`;
+  };
   const hasSelectedShifts = selectedShiftCount > 0;
 
   const getDisplayName = (member: TeamMember) => {
@@ -129,28 +154,64 @@ export function ScheduleFilters({
         <span>Filters:</span>
       </div>
 
-      <Select
-        value={selectedLocation || "all"}
-        onValueChange={(value) => onLocationChange(value === "all" ? null : value)}
-      >
-        <SelectTrigger className="w-[160px] h-8 text-sm">
-          <SelectValue placeholder="All Locations" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Locations</SelectItem>
-          {locations.map((location) => (
-            <SelectItem key={location.id} value={location.id}>
-              {location.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(
+              "h-8 text-sm justify-between min-w-[160px]",
+              selectedLocations.length > 0 && "border-primary bg-green-100"
+            )}
+          >
+            <div className="flex items-center gap-1.5">
+              <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+              <span>{getLocationLabel()}</span>
+            </div>
+            <ChevronDown className="h-3.5 w-3.5 ml-2 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[200px] p-2" align="start">
+          <div className="space-y-1">
+            {locations.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-2 text-center">
+                No locations available
+              </p>
+            ) : (
+              <>
+                {selectedLocations.length > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start h-8 text-xs text-muted-foreground"
+                    onClick={() => onLocationsChange([])}
+                  >
+                    Clear selection
+                  </Button>
+                )}
+                {locations.map((location) => (
+                  <label
+                    key={location.id}
+                    className="flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer hover:bg-muted transition-colors"
+                  >
+                    <Checkbox
+                      checked={selectedLocations.includes(location.id)}
+                      onCheckedChange={() => toggleLocation(location.id)}
+                    />
+                    <span className="text-sm">{location.name}</span>
+                  </label>
+                ))}
+              </>
+            )}
+          </div>
+        </PopoverContent>
+      </Popover>
 
       <Select
         value={selectedPosition || "all"}
         onValueChange={(value) => onPositionChange(value === "all" ? null : value)}
       >
-        <SelectTrigger className="w-[160px] h-8 text-sm">
+        <SelectTrigger className={cn("w-[160px] h-8 text-sm", selectedPosition && "bg-green-100")}>
           <SelectValue placeholder="All Positions" />
         </SelectTrigger>
         <SelectContent>
@@ -167,7 +228,7 @@ export function ScheduleFilters({
         value={selectedMember || "all"}
         onValueChange={(value) => onMemberChange(value === "all" ? null : value)}
       >
-        <SelectTrigger className="w-[180px] h-8 text-sm">
+        <SelectTrigger className={cn("w-[180px] h-8 text-sm", selectedMember && "bg-green-100")}>
           <SelectValue placeholder="All Members" />
         </SelectTrigger>
         <SelectContent>
@@ -184,7 +245,7 @@ export function ScheduleFilters({
         value={selectedEvent || "all"}
         onValueChange={(value) => onEventChange(value === "all" ? null : value)}
       >
-        <SelectTrigger className="w-[140px] h-8 text-sm">
+        <SelectTrigger className={cn("w-[140px] h-8 text-sm", selectedEvent && "bg-green-100")}>
           <SelectValue placeholder="All Events" />
         </SelectTrigger>
         <SelectContent>

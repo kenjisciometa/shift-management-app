@@ -19,6 +19,7 @@ type Shift = Database["public"]["Tables"]["shifts"]["Row"] & {
   } | null;
   locations: { id: string; name: string } | null;
   departments: { id: string; name: string } | null;
+  positions: { id: string; name: string; color: string } | null;
 };
 
 interface DraggableShiftProps {
@@ -57,6 +58,18 @@ const shiftColors: Record<string, { published: string; draft: string }> = {
   orange: {
     published: "bg-orange-500 border !border-orange-600 text-white dark:bg-orange-600 dark:!border-orange-700",
     draft: "bg-white dark:bg-background border-2 border-dashed !border-orange-400 text-orange-600 dark:!border-orange-500 dark:text-orange-400",
+  },
+  cyan: {
+    published: "bg-cyan-500 border !border-cyan-600 text-white dark:bg-cyan-600 dark:!border-cyan-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-cyan-400 text-cyan-600 dark:!border-cyan-500 dark:text-cyan-400",
+  },
+  indigo: {
+    published: "bg-indigo-500 border !border-indigo-600 text-white dark:bg-indigo-600 dark:!border-indigo-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-indigo-400 text-indigo-600 dark:!border-indigo-500 dark:text-indigo-400",
+  },
+  teal: {
+    published: "bg-teal-500 border !border-teal-600 text-white dark:bg-teal-600 dark:!border-teal-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-teal-400 text-teal-600 dark:!border-teal-500 dark:text-teal-400",
   },
   default: {
     published: "bg-slate-500 border !border-slate-600 text-white dark:bg-slate-600 dark:!border-slate-700",
@@ -122,7 +135,7 @@ export function DraggableShift({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "p-2 rounded-lg cursor-pointer transition-shadow",
+        "group p-2 rounded-lg cursor-pointer transition-shadow",
         colorClass,
         isDragging && "opacity-50 shadow-lg",
         isDraggable && "hover:shadow-md"
@@ -131,7 +144,14 @@ export function DraggableShift({
     >
       <div className="flex items-start gap-2">
         {isDraggable && (
-          <div className="flex flex-col items-center gap-1 -ml-1">
+          <div
+            className={cn(
+              "flex flex-col items-center gap-1 -ml-1 transition-all duration-150 overflow-hidden",
+              isSelected
+                ? "w-6 opacity-100"
+                : "w-0 opacity-0 group-hover:w-6 group-hover:opacity-100"
+            )}
+          >
             <Checkbox
               checked={isSelected}
               onCheckedChange={(checked) => {
@@ -139,14 +159,14 @@ export function DraggableShift({
               }}
               onClick={(e) => e.stopPropagation()}
               className={cn(
-                "h-4 w-4",
+                "h-4 w-4 shrink-0",
                 isPublished && "border-white bg-transparent data-[state=checked]:bg-white data-[state=checked]:border-white data-[state=checked]:text-slate-900"
               )}
             />
             <div
               {...(mounted ? attributes : {})}
               {...(mounted ? listeners : {})}
-              className="cursor-grab active:cursor-grabbing p-1 opacity-50 hover:opacity-100"
+              className="cursor-grab active:cursor-grabbing p-1 opacity-50 hover:opacity-100 shrink-0"
             >
               <GripVertical className={cn("h-4 w-4", isPublished && "text-white")} />
             </div>
@@ -156,10 +176,10 @@ export function DraggableShift({
           <div className="text-[10px] opacity-80 whitespace-nowrap">
             {format(startTime, "h:mm")} - {format(endTime, "h:mm a")}・{durationText}
           </div>
-          <div className="font-medium text-sm truncate">{getDisplayName()}</div>
-          {shift.position && (
-            <div className="text-xs opacity-70 truncate">{shift.position}</div>
+          {shift.positions && (
+            <div className="text-xs opacity-80 truncate">{shift.positions.name}</div>
           )}
+          <div className="font-medium text-sm truncate">{getDisplayName()}</div>
         </div>
       </div>
     </div>

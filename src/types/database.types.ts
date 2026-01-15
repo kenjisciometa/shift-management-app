@@ -911,18 +911,21 @@ export type Database = {
           id: string
           user_id: string
           position_id: string
+          is_primary: boolean | null
           created_at: string | null
         }
         Insert: {
           id?: string
           user_id: string
           position_id: string
+          is_primary?: boolean | null
           created_at?: string | null
         }
         Update: {
           id?: string
           user_id?: string
           position_id?: string
+          is_primary?: boolean | null
           created_at?: string | null
         }
         Relationships: [
@@ -938,6 +941,45 @@ export type Database = {
             columns: ["position_id"]
             isOneToOne: false
             referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_locations: {
+        Row: {
+          id: string
+          user_id: string
+          location_id: string
+          is_primary: boolean | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          location_id: string
+          is_primary?: boolean | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          location_id?: string
+          is_primary?: boolean | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_locations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_locations_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
         ]

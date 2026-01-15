@@ -39,8 +39,8 @@ interface Shift {
   id: string;
   start_time: string;
   end_time: string;
-  position: string | null;
   locations: Location | null;
+  positions: { id: string; name: string; color: string } | null;
 }
 
 interface TeamMember {
@@ -113,8 +113,9 @@ export function SwapRequestDialog({
       const { data, error } = await supabase
         .from("shifts")
         .select(`
-          id, start_time, end_time, position,
-          locations (id, name)
+          id, start_time, end_time,
+          locations (id, name),
+          positions (id, name, color)
         `)
         .eq("user_id", targetId)
         .gte("start_time", now)
@@ -247,10 +248,10 @@ export function SwapRequestDialog({
                   <span>{selectedShift.locations.name}</span>
                 </div>
               )}
-              {selectedShift.position && (
+              {selectedShift.positions && (
                 <div className="flex items-center gap-2">
                   <User className="h-4 w-4 text-muted-foreground" />
-                  <span>{selectedShift.position}</span>
+                  <span>{selectedShift.positions.name}</span>
                 </div>
               )}
             </div>

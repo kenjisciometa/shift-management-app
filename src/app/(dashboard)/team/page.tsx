@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { TeamDashboard } from "@/components/team/dashboard";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export default async function TeamPage() {
   const authData = await getAuthData();
@@ -14,15 +15,16 @@ export default async function TeamPage() {
   const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
 
   const supabase = await getCachedSupabase();
+  const adminSupabase = createAdminClient();
 
-  // Parallel fetch all data
-  const [teamMembersResult, invitationsResult, departmentsResult, positionsResult] = await Promise.all([
-    // Get team members with their positions
-    supabase
+  // Parallel fetch all data - using admin client to bypass RLS for team members
+  const [teamMembersResult, invitationsResult, departmentsResult, positionsResult, locationsResult] = await Promise.all([
+    // Get team members with their positions (using admin client to bypass RLS)
+    adminSupabase
       .from("profiles")
       .select(`
         *,
-        departments (id, name),
+        departments!profiles_department_id_fkey (id, name),
         user_positions (
           position_id,
           positions (*)
@@ -61,6 +63,12 @@ export default async function TeamPage() {
       .select("*")
       .eq("organization_id", profile.organization_id)
       .order("sort_order"),
+    // Get locations
+    supabase
+      .from("locations")
+      .select("*")
+      .eq("organization_id", profile.organization_id)
+      .order("name"),
   ]);
 
   return (
@@ -73,6 +81,7 @@ export default async function TeamPage() {
           invitations={invitationsResult.data || []}
           departments={departmentsResult.data || []}
           positions={positionsResult.data || []}
+          locations={locationsResult.data || []}
           isAdmin={isAdmin}
         />
       </div>

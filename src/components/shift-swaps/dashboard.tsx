@@ -34,8 +34,8 @@ type ShiftInfo = {
   id: string;
   start_time: string;
   end_time: string;
-  position: string | null;
   locations: { id: string; name: string } | null;
+  positions: { id: string; name: string; color: string } | null;
 };
 
 type PersonInfo = {
@@ -216,8 +216,8 @@ export function ShiftSwapsDashboard({
               {shift.locations.name}
             </div>
           )}
-          {shift.position && (
-            <div className="text-xs text-muted-foreground">{shift.position}</div>
+          {shift.positions && (
+            <div className="text-xs text-muted-foreground">{shift.positions.name}</div>
           )}
         </>
       ) : (

@@ -16,6 +16,7 @@ type Shift = Database["public"]["Tables"]["shifts"]["Row"] & {
   } | null;
   locations: { id: string; name: string } | null;
   departments: { id: string; name: string } | null;
+  positions: { id: string; name: string; color: string } | null;
 };
 
 interface ShiftCardProps {
@@ -53,6 +54,18 @@ const shiftColors: Record<string, { published: string; draft: string }> = {
   orange: {
     published: "bg-orange-500 border !border-orange-600 text-white dark:bg-orange-600 dark:!border-orange-700",
     draft: "bg-white dark:bg-background border-2 border-dashed !border-orange-400 text-orange-600 dark:!border-orange-500 dark:text-orange-400",
+  },
+  cyan: {
+    published: "bg-cyan-500 border !border-cyan-600 text-white dark:bg-cyan-600 dark:!border-cyan-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-cyan-400 text-cyan-600 dark:!border-cyan-500 dark:text-cyan-400",
+  },
+  indigo: {
+    published: "bg-indigo-500 border !border-indigo-600 text-white dark:bg-indigo-600 dark:!border-indigo-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-indigo-400 text-indigo-600 dark:!border-indigo-500 dark:text-indigo-400",
+  },
+  teal: {
+    published: "bg-teal-500 border !border-teal-600 text-white dark:bg-teal-600 dark:!border-teal-700",
+    draft: "bg-white dark:bg-background border-2 border-dashed !border-teal-400 text-teal-600 dark:!border-teal-500 dark:text-teal-400",
   },
   default: {
     published: "bg-slate-500 border !border-slate-600 text-white dark:bg-slate-600 dark:!border-slate-700",
@@ -117,18 +130,16 @@ export function ShiftCard({ shift, compact, expanded, onClick }: ShiftCardProps)
             <Clock className="h-3 w-3" />
             {format(startTime, "h:mm a")} - {format(endTime, "h:mm a")}・{durationText}
           </div>
-          <div className="font-medium truncate">{getDisplayName()}</div>
+          {shift.positions && (
+            <div className="text-sm opacity-80 truncate">{shift.positions.name}</div>
+          )}
           {shift.locations && (
             <div className="flex items-center gap-1 text-sm opacity-70">
               <MapPin className="h-3 w-3" />
               {shift.locations.name}
             </div>
           )}
-          {shift.position && (
-            <Badge variant="outline" className="mt-1 text-xs">
-              {shift.position}
-            </Badge>
-          )}
+          <div className="font-medium truncate">{getDisplayName()}</div>
         </div>
         {!shift.is_published && (
           <Badge variant="secondary" className="mt-2 text-xs">
@@ -151,6 +162,9 @@ export function ShiftCard({ shift, compact, expanded, onClick }: ShiftCardProps)
       <div className="opacity-80">
         {format(startTime, "h:mm")} - {format(endTime, "h:mm a")}・{durationText}
       </div>
+      {shift.positions && (
+        <div className="opacity-80 truncate">{shift.positions.name}</div>
+      )}
       <div className="font-medium truncate">{getDisplayName()}</div>
     </div>
   );

@@ -71,9 +71,10 @@ export async function PUT(
     }
 
     // Create notification for the employee
+    // Use the current user's profile as the reviewer
     const reviewerName =
-      updatedTimesheet.profiles_timesheets_reviewed_by_fkey?.display_name ||
-      `${updatedTimesheet.profiles_timesheets_reviewed_by_fkey?.first_name} ${updatedTimesheet.profiles_timesheets_reviewed_by_fkey?.last_name}`;
+      profile.display_name ||
+      `${profile.first_name} ${profile.last_name}`;
 
     await createTimesheetNotification(supabase, {
       userId: existingTimesheet.user_id,

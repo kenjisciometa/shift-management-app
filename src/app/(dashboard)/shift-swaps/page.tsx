@@ -37,12 +37,14 @@ export default async function ShiftSwapsPage() {
       `
       *,
       requester_shift:shifts!shift_swaps_requester_shift_id_fkey (
-        id, start_time, end_time, position,
-        locations (id, name)
+        id, start_time, end_time,
+        locations (id, name),
+        positions (id, name, color)
       ),
       target_shift:shifts!shift_swaps_target_shift_id_fkey (
-        id, start_time, end_time, position,
-        locations (id, name)
+        id, start_time, end_time,
+        locations (id, name),
+        positions (id, name, color)
       ),
       target:profiles!shift_swaps_target_id_fkey (
         id, first_name, last_name, display_name, avatar_url
@@ -59,12 +61,14 @@ export default async function ShiftSwapsPage() {
       `
       *,
       requester_shift:shifts!shift_swaps_requester_shift_id_fkey (
-        id, start_time, end_time, position,
-        locations (id, name)
+        id, start_time, end_time,
+        locations (id, name),
+        positions (id, name, color)
       ),
       target_shift:shifts!shift_swaps_target_shift_id_fkey (
-        id, start_time, end_time, position,
-        locations (id, name)
+        id, start_time, end_time,
+        locations (id, name),
+        positions (id, name, color)
       ),
       requester:profiles!shift_swaps_requester_id_fkey (
         id, first_name, last_name, display_name, avatar_url
@@ -84,12 +88,14 @@ export default async function ShiftSwapsPage() {
         `
         *,
         requester_shift:shifts!shift_swaps_requester_shift_id_fkey (
-          id, start_time, end_time, position,
-          locations (id, name)
+          id, start_time, end_time,
+          locations (id, name),
+          positions (id, name, color)
         ),
         target_shift:shifts!shift_swaps_target_shift_id_fkey (
-          id, start_time, end_time, position,
-          locations (id, name)
+          id, start_time, end_time,
+          locations (id, name),
+          positions (id, name, color)
         ),
         requester:profiles!shift_swaps_requester_id_fkey (
           id, first_name, last_name, display_name, avatar_url
@@ -111,8 +117,9 @@ export default async function ShiftSwapsPage() {
     .from("shifts")
     .select(
       `
-      id, start_time, end_time, position,
-      locations (id, name)
+      id, start_time, end_time,
+      locations (id, name),
+      positions (id, name, color)
     `
     )
     .eq("user_id", user.id)

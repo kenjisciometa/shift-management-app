@@ -101,7 +101,8 @@ function generateCSV(timesheet: any, timeEntries: any[]): string {
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   };
 
-  const formatTime = (date: Date | string) => {
+  const formatTime = (date: Date | string | null) => {
+    if (!date) return "N/A";
     return format(typeof date === "string" ? parseISO(date) : date, "h:mm a");
   };
 
@@ -236,7 +237,7 @@ function generatePDFHTML(timesheet: any, timeEntries: any[]): string {
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   };
 
-  const formatTime = (date: Date | string) => {
+  const formatTime = (date: Date | string | null) => {
     if (!date) return "N/A";
     return format(typeof date === "string" ? parseISO(date) : date, "h:mm a");
   };
