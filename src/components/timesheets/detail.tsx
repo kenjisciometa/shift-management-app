@@ -76,9 +76,17 @@ type TimeEntry = Database["public"]["Tables"]["time_entries"]["Row"] & {
   locations: { id: string; name: string } | null;
 };
 
+type Shift = {
+  id: string;
+  start_time: string;
+  end_time: string;
+  break_minutes: number | null;
+};
+
 interface TimesheetDetailProps {
   timesheet: Timesheet;
   timeEntries: TimeEntry[];
+  shifts: Shift[];
   profile: Profile;
   isAdmin: boolean;
 }
@@ -102,6 +110,7 @@ const statusIcons: Record<string, typeof CheckCircle2> = {
 export function TimesheetDetail({
   timesheet,
   timeEntries: initialTimeEntries,
+  shifts,
   profile,
   isAdmin,
 }: TimesheetDetailProps) {
@@ -158,6 +167,8 @@ export function TimesheetDetail({
         breaks: Array<{ start: Date; end: Date; duration: number }>;
         totalWorkMinutes: number;
         totalBreakMinutes: number;
+        scheduledMinutes: number;
+        differenceMinutes: number;
         location: string | null;
       }
     > = {};
@@ -171,6 +182,20 @@ export function TimesheetDetail({
       const dateKey = format(entryTime, "yyyy-MM-dd");
 
       if (!breakdown[dateKey]) {
+        // Find scheduled shift for this day
+        const dayShift = shifts.find((shift) => {
+          const shiftDate = shift.start_time.split("T")[0];
+          return shiftDate === dateKey;
+        });
+
+        let scheduledMinutes = 0;
+        if (dayShift) {
+          const shiftStart = new Date(dayShift.start_time).getTime();
+          const shiftEnd = new Date(dayShift.end_time).getTime();
+          const shiftBreakMinutes = dayShift.break_minutes || 0;
+          scheduledMinutes = Math.round((shiftEnd - shiftStart) / 60000) - shiftBreakMinutes;
+        }
+
         breakdown[dateKey] = {
           date: entryTime,
           clockIn: null,
@@ -180,6 +205,8 @@ export function TimesheetDetail({
           breaks: [],
           totalWorkMinutes: 0,
           totalBreakMinutes: 0,
+          scheduledMinutes,
+          differenceMinutes: 0,
           location: entry.locations?.name || null,
         };
         dayBreaks[dateKey] = [];
@@ -203,6 +230,7 @@ export function TimesheetDetail({
             );
             breakdown[dateKey].totalWorkMinutes = workMinutes - breakMinutes;
             breakdown[dateKey].totalBreakMinutes = breakMinutes;
+            breakdown[dateKey].differenceMinutes = breakdown[dateKey].totalWorkMinutes - breakdown[dateKey].scheduledMinutes;
             currentClockIn = null;
           }
           break;
@@ -241,6 +269,11 @@ export function TimesheetDetail({
       (sum, day) => sum + day.totalBreakMinutes,
       0
     );
+    const totalScheduledMinutes = dailyBreakdown.reduce(
+      (sum, day) => sum + day.scheduledMinutes,
+      0
+    );
+    const totalDifferenceMinutes = totalWorkMinutes - totalScheduledMinutes;
     // Overtime is calculated as hours exceeding 40 per week
     const regularHoursLimit = 40 * 60; // 40 hours in minutes
     const overtimeMinutes = Math.max(0, totalWorkMinutes - regularHoursLimit);
@@ -249,6 +282,8 @@ export function TimesheetDetail({
       totalHours: totalWorkMinutes / 60,
       breakHours: totalBreakMinutes / 60,
       overtimeHours: overtimeMinutes / 60,
+      scheduledHours: totalScheduledMinutes / 60,
+      differenceHours: totalDifferenceMinutes / 60,
     };
   })();
 
@@ -335,9 +370,10 @@ export function TimesheetDetail({
       "Location",
       "Clock In",
       "Clock Out",
-      "Work Hours",
+      "Scheduled Hours",
+      "Actual Hours",
+      "Difference",
       "Break Hours",
-      "Number of Breaks",
     ];
 
     const rows = dailyBreakdown.map((day) => [
@@ -346,9 +382,10 @@ export function TimesheetDetail({
       day.location || "N/A",
       day.clockIn ? formatTime(day.clockIn) : "N/A",
       day.clockOut ? formatTime(day.clockOut) : "N/A",
+      day.scheduledMinutes > 0 ? formatHours(day.scheduledMinutes / 60) : "N/A",
       formatHours(day.totalWorkMinutes / 60),
+      day.scheduledMinutes > 0 ? `${day.differenceMinutes > 0 ? "+" : ""}${formatHours(day.differenceMinutes / 60)}` : "N/A",
       formatHours(day.totalBreakMinutes / 60),
-      String(day.breaks.length),
     ]);
 
     // Add summary rows
@@ -357,6 +394,7 @@ export function TimesheetDetail({
     rows.push([
       "Employee",
       getDisplayName(timesheet.profiles),
+      "",
       "",
       "",
       "",
@@ -373,10 +411,34 @@ export function TimesheetDetail({
       "",
       "",
       "",
+      "",
     ]);
     rows.push([
-      "Total Hours",
+      "Scheduled Hours",
+      formatHours(calculatedTotals.scheduledHours),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    rows.push([
+      "Actual Hours",
       formatHours(calculatedTotals.totalHours),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    rows.push([
+      "Difference",
+      `${calculatedTotals.differenceHours > 0 ? "+" : ""}${formatHours(calculatedTotals.differenceHours)}`,
+      "",
       "",
       "",
       "",
@@ -393,6 +455,7 @@ export function TimesheetDetail({
       "",
       "",
       "",
+      "",
     ]);
     rows.push([
       "Overtime Hours",
@@ -403,8 +466,9 @@ export function TimesheetDetail({
       "",
       "",
       "",
+      "",
     ]);
-    rows.push(["Status", timesheet.status || "N/A", "", "", "", "", "", ""]);
+    rows.push(["Status", timesheet.status || "N/A", "", "", "", "", "", "", ""]);
 
     const csvContent = [
       headers.join(","),
@@ -524,7 +588,7 @@ export function TimesheetDetail({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div className="space-y-1">
               <div className="text-sm text-muted-foreground flex items-center gap-1">
                 <User className="h-3 w-3" />
@@ -549,12 +613,24 @@ export function TimesheetDetail({
               </div>
             </div>
             <div className="space-y-1">
+              <div className="text-sm text-muted-foreground">Scheduled</div>
+              <div className="text-lg font-semibold text-muted-foreground">
+                {formatHours(calculatedTotals.scheduledHours)}
+              </div>
+            </div>
+            <div className="space-y-1">
               <div className="text-sm text-muted-foreground flex items-center gap-1">
                 <Clock className="h-3 w-3" />
-                Total Hours
+                Actual Hours
               </div>
               <div className="text-lg font-semibold">
                 {formatHours(calculatedTotals.totalHours)}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-sm text-muted-foreground">Difference</div>
+              <div className={`text-lg font-semibold ${calculatedTotals.differenceHours > 0 ? "text-green-600" : calculatedTotals.differenceHours < 0 ? "text-red-600" : ""}`}>
+                {calculatedTotals.differenceHours > 0 ? "+" : ""}{formatHours(calculatedTotals.differenceHours)}
               </div>
             </div>
             <div className="space-y-1">
@@ -650,9 +726,10 @@ export function TimesheetDetail({
                     <TableHead>Location</TableHead>
                     <TableHead>Clock In</TableHead>
                     <TableHead>Clock Out</TableHead>
-                    <TableHead className="text-right">Work Hours</TableHead>
-                    <TableHead className="text-right">Break Hours</TableHead>
-                    <TableHead className="text-right">Breaks</TableHead>
+                    <TableHead className="text-right">Scheduled</TableHead>
+                    <TableHead className="text-right">Actual</TableHead>
+                    <TableHead className="text-right">Diff</TableHead>
+                    <TableHead className="text-right">Break</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -708,16 +785,22 @@ export function TimesheetDetail({
                             )}
                           </div>
                         </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {day.scheduledMinutes > 0 ? formatHours(day.scheduledMinutes / 60) : "-"}
+                        </TableCell>
                         <TableCell className="text-right font-medium">
                           {formatHours(day.totalWorkMinutes / 60)}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {formatHours(day.totalBreakMinutes / 60)}
+                        <TableCell className={`text-right font-medium ${day.differenceMinutes > 0 ? "text-green-600" : day.differenceMinutes < 0 ? "text-red-600" : ""}`}>
+                          {day.scheduledMinutes > 0 ? (
+                            <>
+                              {day.differenceMinutes > 0 ? "+" : ""}
+                              {formatHours(day.differenceMinutes / 60)}
+                            </>
+                          ) : "-"}
                         </TableCell>
                         <TableCell className="text-right text-sm text-muted-foreground">
-                          {day.breaks.length > 0
-                            ? `${day.breaks.length} break${day.breaks.length > 1 ? "s" : ""}`
-                            : "-"}
+                          {formatHours(day.totalBreakMinutes / 60)}
                         </TableCell>
                       </TableRow>
                     );

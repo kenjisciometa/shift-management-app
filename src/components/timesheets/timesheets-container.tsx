@@ -119,6 +119,7 @@ export function TimesheetsContainer({
           location_id,
           is_manual,
           notes,
+          status,
           profiles!time_entries_user_id_fkey (
             id,
             first_name,
@@ -154,8 +155,41 @@ export function TimesheetsContainer({
         return;
       }
 
-      // Process time entries into table rows
-      const rows = processTimeEntries(timeEntries || [], statusFilter);
+      // Fetch shifts for the same period to calculate scheduled hours
+      let shiftsQuery = supabase
+        .from("shifts")
+        .select(`
+          id,
+          user_id,
+          start_time,
+          end_time,
+          break_minutes,
+          location_id,
+          profiles!shifts_user_id_fkey (
+            id,
+            first_name,
+            last_name,
+            display_name
+          ),
+          locations (
+            id,
+            name
+          )
+        `)
+        .eq("organization_id", profile.organization_id)
+        .gte("start_time", `${startDate}T00:00:00`)
+        .lte("start_time", `${endDate}T23:59:59`);
+
+      if (!access.canViewAllTimesheets) {
+        shiftsQuery = shiftsQuery.eq("user_id", profile.id);
+      } else if (employeeFilter !== "all") {
+        shiftsQuery = shiftsQuery.eq("user_id", employeeFilter);
+      }
+
+      const { data: shifts } = await shiftsQuery;
+
+      // Process time entries into table rows with shift data
+      const rows = processTimeEntries(timeEntries || [], statusFilter, shifts || []);
 
       // Sort data
       const sortedRows = sortData(rows, sort);
@@ -258,6 +292,48 @@ export function TimesheetsContainer({
   };
 
   /**
+   * Handle bulk status change
+   */
+  const handleBulkStatusChange = async (entryIds: string[], status: TimesheetStatus) => {
+    try {
+      // Collect all time entry IDs to update
+      const allTimeEntryIds: string[] = [];
+
+      for (const entryId of entryIds) {
+        // Find the corresponding row to get time entry IDs
+        const row = data.find((r) => r.id === entryId);
+        if (!row) continue;
+
+        // Get all time entry IDs for this row
+        const timeEntryIds = Object.values(row.timeEntryIds).filter(Boolean) as string[];
+        allTimeEntryIds.push(...timeEntryIds);
+      }
+
+      if (allTimeEntryIds.length > 0) {
+        // Batch update all time entries with new status
+        const { error } = await supabase
+          .from("time_entries")
+          .update({
+            status,
+            approved_at: status === "approved" ? new Date().toISOString() : null,
+            approved_by: status === "approved" ? profile.id : null,
+            updated_at: new Date().toISOString(),
+          })
+          .in("id", allTimeEntryIds);
+
+        if (error) throw error;
+      }
+
+      toast.success(`${entryIds.length} entries updated to ${status}`);
+      await fetchData();
+    } catch (error) {
+      console.error("Error updating status:", error);
+      toast.error("Failed to update status");
+      throw error;
+    }
+  };
+
+  /**
    * Handle CSV export
    */
   const handleExportCSV = async () => {
@@ -310,19 +386,16 @@ export function TimesheetsContainer({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{pageTitle}</h1>
-        <Button onClick={handleExportCSV} variant="outline">
-          <Download className="h-4 w-4 mr-2" />
-          Export CSV
-        </Button>
-      </div>
-
       {/* Filters Card */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base font-medium">Filters</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-medium">Filters</CardTitle>
+            <Button onClick={handleExportCSV} variant="outline" size="sm">
+              <Download className="h-4 w-4 mr-2" />
+              Export CSV
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Period and Date Row */}
@@ -370,6 +443,7 @@ export function TimesheetsContainer({
         pagination={pagination}
         onPageChange={handlePageChange}
         onEditEntry={handleEditEntry}
+        onBulkStatusChange={handleBulkStatusChange}
         loading={loading}
       />
 
@@ -397,6 +471,7 @@ function processTimeEntries(
     location_id: string | null;
     is_manual: boolean | null;
     notes: string | null;
+    status: string | null;
     profiles: {
       id: string;
       first_name: string | null;
@@ -408,7 +483,25 @@ function processTimeEntries(
       name: string;
     } | null;
   }>,
-  statusFilter: TimesheetStatus | "all"
+  statusFilter: TimesheetStatus | "all",
+  shifts: Array<{
+    id: string;
+    user_id: string;
+    start_time: string;
+    end_time: string;
+    break_minutes: number | null;
+    location_id: string | null;
+    profiles: {
+      id: string;
+      first_name: string | null;
+      last_name: string | null;
+      display_name: string | null;
+    } | null;
+    locations: {
+      id: string;
+      name: string;
+    } | null;
+  }>
 ): TimesheetTableRow[] {
   // Group entries by user and date
   const grouped = new Map<string, typeof timeEntries>();
@@ -481,14 +574,32 @@ function processTimeEntries(
     // Check for auto clock-out (placeholder - would need to check device_info or notes)
     const autoClockOut = clockOut?.notes?.includes("auto") || false;
 
-    // Determine status (for now, default to pending)
-    // In real implementation, this would come from a timesheet record
-    const status: TimesheetStatus = "pending";
+    // Determine status from clock_in entry (or first entry with status)
+    const entryWithStatus = entries.find((e) => e.status) || clockIn;
+    const status: TimesheetStatus = (entryWithStatus?.status as TimesheetStatus) || "pending";
 
     // Apply status filter
     if (statusFilter !== "all" && status !== statusFilter) {
       continue;
     }
+
+    // Find the scheduled shift for this user and date
+    const scheduledShift = shifts.find((shift) => {
+      const shiftDate = shift.start_time.split("T")[0];
+      return shift.user_id === userId && shiftDate === date;
+    });
+
+    // Calculate scheduled shift duration in minutes
+    let scheduledMinutes = 0;
+    if (scheduledShift) {
+      const shiftStart = new Date(scheduledShift.start_time).getTime();
+      const shiftEnd = new Date(scheduledShift.end_time).getTime();
+      const shiftBreakMinutes = scheduledShift.break_minutes || 0;
+      scheduledMinutes = Math.round((shiftEnd - shiftStart) / 60000) - shiftBreakMinutes;
+    }
+
+    // Calculate difference (actual - scheduled) only if there's actual work
+    const difference = workMinutes > 0 ? workMinutes - scheduledMinutes : null;
 
     rows.push({
       id: key,
@@ -505,14 +616,74 @@ function processTimeEntries(
       breakStart: breakStartTime,
       breakEnd: breakEndTime,
       shiftDuration: workMinutes,
-      scheduleShiftDuration: 0, // Would come from scheduled shift
-      difference: workMinutes, // Would be actual - scheduled
+      scheduleShiftDuration: scheduledMinutes,
+      difference,
       status,
       timeEntryIds: {
         clockIn: clockIn?.id,
         clockOut: clockOut?.id,
         breakStart: breakStart?.id,
         breakEnd: breakEnd?.id,
+      },
+    });
+  }
+
+  // Add scheduled shifts that don't have time entries
+  for (const shift of shifts) {
+    const shiftDate = shift.start_time.split("T")[0];
+    const key = `${shift.user_id}_${shiftDate}`;
+
+    // Skip if we already have time entries for this user/date
+    if (grouped.has(key)) {
+      continue;
+    }
+
+    // Calculate scheduled shift duration in minutes
+    const shiftStart = new Date(shift.start_time).getTime();
+    const shiftEnd = new Date(shift.end_time).getTime();
+    const shiftBreakMinutes = shift.break_minutes || 0;
+    const scheduledMinutes = Math.round((shiftEnd - shiftStart) / 60000) - shiftBreakMinutes;
+
+    // Get employee name from shift's profile
+    const shiftProfile = shift.profiles;
+    const name = shiftProfile?.display_name ||
+      `${shiftProfile?.first_name || ""} ${shiftProfile?.last_name || ""}`.trim() ||
+      "Unknown";
+
+    // Get location from shift
+    const locationName = shift.locations?.name || "";
+
+    // Determine status - scheduled shifts without clock in are "scheduled"
+    const status: TimesheetStatus = "pending";
+
+    // Apply status filter
+    if (statusFilter !== "all" && status !== statusFilter) {
+      continue;
+    }
+
+    rows.push({
+      id: `shift_${shift.id}`,
+      userId: shift.user_id,
+      name,
+      date: shiftDate,
+      locations: locationName,
+      locationId: shift.location_id,
+      positions: "",
+      clockInTime: null,
+      clockOutTime: null,
+      autoClockOut: false,
+      breakDuration: 0,
+      breakStart: null,
+      breakEnd: null,
+      shiftDuration: 0,
+      scheduleShiftDuration: scheduledMinutes,
+      difference: null, // No work done yet, so no difference to show
+      status,
+      timeEntryIds: {
+        clockIn: undefined,
+        clockOut: undefined,
+        breakStart: undefined,
+        breakEnd: undefined,
       },
     });
   }

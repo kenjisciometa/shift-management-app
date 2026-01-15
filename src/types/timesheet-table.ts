@@ -51,8 +51,8 @@ export interface TimesheetTableRow {
   shiftDuration: number;
   /** Scheduled shift duration in minutes */
   scheduleShiftDuration: number;
-  /** Difference between actual and scheduled (can be negative) */
-  difference: number;
+  /** Difference between actual and scheduled (can be negative, null if no actual work) */
+  difference: number | null;
   /** Entry status */
   status: TimesheetStatus;
   /** Original time entry IDs for editing */

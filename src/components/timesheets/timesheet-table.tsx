@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Table,
   TableBody,
@@ -11,6 +11,13 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Pencil,
   ArrowUpDown,
@@ -18,12 +25,17 @@ import {
   ArrowDown,
   ChevronLeft,
   ChevronRight,
+  CheckCircle,
+  XCircle,
+  Clock,
+  ChevronDown,
 } from "lucide-react";
 import type {
   TimesheetTableRow,
   TimesheetSort,
   SortField,
   TimesheetPagination,
+  TimesheetStatus,
 } from "@/types/timesheet-table";
 import type { TimesheetAccess } from "@/hooks/use-timesheet-access";
 import { cn } from "@/lib/utils";
@@ -37,6 +49,7 @@ interface TimesheetTableProps {
   pagination: TimesheetPagination;
   onPageChange: (page: number) => void;
   onEditEntry: (entry: TimesheetTableRow) => void;
+  onBulkStatusChange?: (entryIds: string[], status: TimesheetStatus) => Promise<void>;
   loading?: boolean;
 }
 
@@ -143,9 +156,20 @@ export function TimesheetTable({
   pagination,
   onPageChange,
   onEditEntry,
+  onBulkStatusChange,
   loading,
 }: TimesheetTableProps) {
   const showNameColumn = access.canViewAllTimesheets;
+  const canBulkEdit = access.canEditAllTimesheets && onBulkStatusChange;
+
+  // Selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+
+  // Reset selection when data changes
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [data]);
 
   /**
    * Check if user can edit this specific entry
@@ -158,13 +182,108 @@ export function TimesheetTable({
     return false;
   };
 
+  /**
+   * Handle select all checkbox
+   */
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(data.map((entry) => entry.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  /**
+   * Handle individual row selection
+   */
+  const handleSelectRow = (id: string, checked: boolean) => {
+    const newSelected = new Set(selectedIds);
+    if (checked) {
+      newSelected.add(id);
+    } else {
+      newSelected.delete(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  /**
+   * Handle bulk status change
+   */
+  const handleBulkStatusChange = async (status: TimesheetStatus) => {
+    if (!onBulkStatusChange || selectedIds.size === 0) return;
+
+    setBulkLoading(true);
+    try {
+      await onBulkStatusChange(Array.from(selectedIds), status);
+      setSelectedIds(new Set());
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const isAllSelected = data.length > 0 && selectedIds.size === data.length;
+  const isIndeterminate = selectedIds.size > 0 && selectedIds.size < data.length;
+  const colSpan = showNameColumn ? 16 : 15;
+
   return (
     <div className="space-y-4">
+      {/* Bulk Action Bar */}
+      {canBulkEdit && selectedIds.size > 0 && (
+        <div className="flex items-center gap-4 p-3 bg-muted rounded-lg">
+          <span className="text-sm font-medium">
+            {selectedIds.size} item{selectedIds.size > 1 ? "s" : ""} selected
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={bulkLoading}>
+                Change Status
+                <ChevronDown className="h-4 w-4 ml-2" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => handleBulkStatusChange("approved")}>
+                <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                Approve
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleBulkStatusChange("rejected")}>
+                <XCircle className="h-4 w-4 mr-2 text-red-600" />
+                Reject
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleBulkStatusChange("pending")}>
+                <Clock className="h-4 w-4 mr-2 text-yellow-600" />
+                Set Pending
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            Clear selection
+          </Button>
+        </div>
+      )}
+
       {/* Table */}
       <div className="rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
+              {canBulkEdit && (
+                <TableHead className="w-[50px]">
+                  <Checkbox
+                    checked={isAllSelected}
+                    ref={(el) => {
+                      if (el) {
+                        (el as HTMLButtonElement & { indeterminate: boolean }).indeterminate = isIndeterminate;
+                      }
+                    }}
+                    onCheckedChange={handleSelectAll}
+                    aria-label="Select all"
+                  />
+                </TableHead>
+              )}
               {showNameColumn && (
                 <SortableHeader
                   field="name"
@@ -224,7 +343,7 @@ export function TimesheetTable({
             {loading ? (
               <TableRow>
                 <TableCell
-                  colSpan={showNameColumn ? 15 : 14}
+                  colSpan={colSpan}
                   className="h-24 text-center"
                 >
                   Loading...
@@ -233,7 +352,7 @@ export function TimesheetTable({
             ) : data.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={showNameColumn ? 15 : 14}
+                  colSpan={colSpan}
                   className="h-24 text-center text-muted-foreground"
                 >
                   No timesheet entries found.
@@ -241,7 +360,21 @@ export function TimesheetTable({
               </TableRow>
             ) : (
               data.map((entry) => (
-                <TableRow key={entry.id}>
+                <TableRow
+                  key={entry.id}
+                  className={cn(selectedIds.has(entry.id) && "bg-muted/50")}
+                >
+                  {canBulkEdit && (
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.has(entry.id)}
+                        onCheckedChange={(checked) =>
+                          handleSelectRow(entry.id, checked as boolean)
+                        }
+                        aria-label={`Select ${entry.name}`}
+                      />
+                    </TableCell>
+                  )}
                   {showNameColumn && (
                     <TableCell className="font-medium">{entry.name}</TableCell>
                   )}
@@ -271,14 +404,18 @@ export function TimesheetTable({
                   <TableCell>{formatDuration(entry.shiftDuration)}</TableCell>
                   <TableCell>{formatDuration(entry.scheduleShiftDuration)}</TableCell>
                   <TableCell>
-                    <span
-                      className={cn(
-                        entry.difference > 0 && "text-green-600",
-                        entry.difference < 0 && "text-red-600"
-                      )}
-                    >
-                      {formatDifference(entry.difference)}
-                    </span>
+                    {entry.difference !== null ? (
+                      <span
+                        className={cn(
+                          entry.difference > 0 && "text-green-600",
+                          entry.difference < 0 && "text-red-600"
+                        )}
+                      >
+                        {formatDifference(entry.difference)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
                   </TableCell>
                   <TableCell>{getStatusBadge(entry.status)}</TableCell>
                   <TableCell>

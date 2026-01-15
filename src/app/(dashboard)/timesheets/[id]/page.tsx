@@ -57,6 +57,16 @@ export default async function TimesheetDetailPage({
     .lte("timestamp", periodEnd.toISOString())
     .order("timestamp", { ascending: true });
 
+  // Fetch scheduled shifts for this period
+  const { data: shifts } = await supabase
+    .from("shifts")
+    .select("id, start_time, end_time, break_minutes")
+    .eq("user_id", timesheet.user_id)
+    .eq("organization_id", profile.organization_id)
+    .gte("start_time", periodStart.toISOString())
+    .lte("start_time", periodEnd.toISOString())
+    .order("start_time", { ascending: true });
+
   return (
     <>
       <DashboardHeader title="Timesheet Details" />
@@ -64,6 +74,7 @@ export default async function TimesheetDetailPage({
         <TimesheetDetail
           timesheet={timesheet}
           timeEntries={timeEntries || []}
+          shifts={shifts || []}
           profile={profile}
           isAdmin={isAdmin}
         />

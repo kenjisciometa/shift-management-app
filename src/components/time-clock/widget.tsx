@@ -166,6 +166,31 @@ export function TimeClockWidget({
     setLoading(true);
 
     try {
+      // Find today's shift for this user (for clock_in)
+      let shiftId: string | null = null;
+      if (entryType === "clock_in") {
+        const today = new Date();
+        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+
+        const { data: todayShift } = await supabase
+          .from("shifts")
+          .select("id")
+          .eq("user_id", profile.id)
+          .eq("organization_id", profile.organization_id)
+          .gte("start_time", todayStart.toISOString())
+          .lte("start_time", todayEnd.toISOString())
+          .order("start_time", { ascending: true })
+          .limit(1)
+          .single();
+
+        shiftId = todayShift?.id || null;
+      } else {
+        // For other entry types, use the shift_id from the most recent clock_in
+        const lastClockIn = todayEntries.find((e) => e.entry_type === "clock_in");
+        shiftId = lastClockIn?.shift_id || null;
+      }
+
       const { error } = await supabase.from("time_entries").insert({
         organization_id: profile.organization_id,
         user_id: profile.id,
@@ -176,6 +201,7 @@ export function TimeClockWidget({
         accuracy_meters: position?.accuracy,
         location_id: selectedLocationId || null,
         is_inside_geofence: isWithinGeofence,
+        shift_id: shiftId,
       });
 
       if (error) throw error;
