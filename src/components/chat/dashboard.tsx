@@ -27,6 +27,7 @@ type RoomParticipant = {
   id: string;
   user_id: string;
   role: string | null;
+  last_read_at: string | null;
   profiles: {
     id: string;
     first_name: string;

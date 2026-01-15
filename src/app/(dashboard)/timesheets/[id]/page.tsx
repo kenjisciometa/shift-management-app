@@ -1,5 +1,4 @@
 import { redirect, notFound } from "next/navigation";
-import { cookies } from "next/headers";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { TimesheetDetail } from "@/components/timesheets/detail";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
@@ -19,29 +18,29 @@ export default async function TimesheetDetailPage({
   const { user, profile } = authData;
   const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
 
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const cookieStore = await cookies();
-  const allCookies = cookieStore.getAll();
-  const cookieHeader = allCookies.map(c => `${c.name}=${c.value}`).join('; ');
+  const supabase = await getCachedSupabase();
 
-  // Fetch timesheet details using API route
-  const timesheetResponse = await fetch(
-    `${baseUrl}/api/timesheets/${id}`,
-    { headers: { Cookie: cookieHeader } }
-  );
+  // Fetch timesheet details directly using Supabase client
+  const { data: timesheet, error: timesheetError } = await supabase
+    .from("timesheets")
+    .select(`
+      *,
+      profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
+    `)
+    .eq("id", id)
+    .eq("organization_id", profile.organization_id)
+    .single();
 
-  if (!timesheetResponse.ok) {
-    if (timesheetResponse.status === 404) {
-      notFound();
-    }
-    throw new Error("Failed to fetch timesheet");
+  if (timesheetError || !timesheet) {
+    notFound();
   }
 
-  const timesheetData = await timesheetResponse.json();
-  const timesheet = timesheetData.data;
+  // Check if user has access (owner or admin)
+  if (timesheet.user_id !== user.id && !isAdmin) {
+    notFound();
+  }
 
   // Fetch time entries for this period
-  const supabase = await getCachedSupabase();
   const periodStart = new Date(timesheet.period_start);
   const periodEnd = new Date(timesheet.period_end);
   periodEnd.setHours(23, 59, 59, 999);

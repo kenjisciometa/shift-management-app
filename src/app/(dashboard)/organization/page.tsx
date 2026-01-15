@@ -19,8 +19,14 @@ export default async function OrganizationPage() {
 
   const supabase = await getCachedSupabase();
 
-  // Parallel fetch all data
-  const [locationsResult, departmentsResult, teamMembersResult, ptoPoliciesResult] = await Promise.all([
+  // Parallel fetch all data including organization
+  const [organizationResult, locationsResult, departmentsResult, teamMembersResult, ptoPoliciesResult] = await Promise.all([
+    // Get organization directly
+    supabase
+      .from("organizations")
+      .select("*")
+      .eq("id", profile.organization_id)
+      .single(),
     // Get locations
     supabase
       .from("locations")
@@ -57,13 +63,18 @@ export default async function OrganizationPage() {
       .order("name"),
   ]);
 
+  // Redirect if organization not found
+  if (!organizationResult.data) {
+    redirect("/dashboard");
+  }
+
   return (
     <>
       <DashboardHeader title="Organization" profile={profile} />
       <div className="container mx-auto p-6">
         <OrganizationSettings
           profile={profile}
-          organization={profile.organizations!}
+          organization={organizationResult.data}
           locations={locationsResult.data || []}
           departments={departmentsResult.data || []}
           teamMembers={teamMembersResult.data || []}

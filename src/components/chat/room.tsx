@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { Send, Loader2, Users, MoreVertical } from "lucide-react";
+import { Send, Loader2, Users, MoreVertical, Check, CheckCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -30,6 +30,7 @@ type RoomParticipant = {
   id: string;
   user_id: string;
   role: string | null;
+  last_read_at: string | null;
   profiles: {
     id: string;
     first_name: string;
@@ -63,8 +64,14 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [messageInput, setMessageInput] = useState("");
+  const [participantsState, setParticipantsState] = useState<RoomParticipant[]>(participants);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Update participants state when props change
+  useEffect(() => {
+    setParticipantsState(participants);
+  }, [participants]);
 
   const getDisplayName = (
     p: { first_name: string; last_name: string; display_name: string | null } | null
@@ -114,6 +121,15 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
     return format(date, "MMM d, h:mm a");
   };
 
+  // Mark messages as read
+  const markAsRead = async () => {
+    await supabase
+      .from("chat_participants")
+      .update({ last_read_at: new Date().toISOString() })
+      .eq("room_id", room.id)
+      .eq("user_id", profile.id);
+  };
+
   // Fetch messages
   useEffect(() => {
     const fetchMessages = async () => {
@@ -130,6 +146,8 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
         toast.error("Failed to load messages");
       } else {
         setMessages(data || []);
+        // Mark as read when opening the room
+        markAsRead();
       }
       setLoading(false);
     };
@@ -152,6 +170,10 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
         (payload) => {
           const newMessage = payload.new as Message;
           setMessages((prev) => [...prev, newMessage]);
+          // Mark as read when receiving new messages while room is open
+          if (newMessage.sender_id !== profile.id) {
+            markAsRead();
+          }
         }
       )
       .on(
@@ -175,6 +197,49 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
       supabase.removeChannel(channel);
     };
   }, [room.id, supabase]);
+
+  // Subscribe to participant read status updates
+  useEffect(() => {
+    const channel = supabase
+      .channel(`participants:${room.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "chat_participants",
+          filter: `room_id=eq.${room.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as { user_id: string; last_read_at: string | null };
+          setParticipantsState((prev) =>
+            prev.map((p) =>
+              p.user_id === updated.user_id
+                ? { ...p, last_read_at: updated.last_read_at }
+                : p
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [room.id, supabase]);
+
+  // Check if message has been read by other participants
+  const isMessageRead = (message: Message) => {
+    if (message.sender_id !== profile.id) return false; // Only show for own messages
+    if (!message.created_at) return false;
+
+    const messageTime = new Date(message.created_at).getTime();
+    return participantsState.some((p) => {
+      if (p.user_id === profile.id) return false; // Skip self
+      if (!p.last_read_at) return false;
+      return new Date(p.last_read_at).getTime() >= messageTime;
+    });
+  };
 
   // Scroll to bottom on new messages
   useEffect(() => {
@@ -208,11 +273,7 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
       if (error) throw error;
 
       // Update last_read_at for current user
-      await supabase
-        .from("chat_participants")
-        .update({ last_read_at: new Date().toISOString() })
-        .eq("room_id", room.id)
-        .eq("user_id", profile.id);
+      await markAsRead();
     } catch (error) {
       console.error(error);
       toast.error("Failed to send message");
@@ -344,9 +405,18 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
                               {message.content}
                             </p>
                           </div>
-                          <span className="text-xs text-muted-foreground mt-1 mx-1">
-                            {formatMessageDate(message.created_at)}
-                          </span>
+                          <div className="flex items-center gap-1 mt-1 mx-1">
+                            <span className="text-xs text-muted-foreground">
+                              {formatMessageDate(message.created_at)}
+                            </span>
+                            {isOwn && (
+                              isMessageRead(message) ? (
+                                <CheckCheck className="h-3 w-3 text-blue-500" />
+                              ) : (
+                                <Check className="h-3 w-3 text-muted-foreground" />
+                              )
+                            )}
+                          </div>
                         </div>
                       </div>
                     );

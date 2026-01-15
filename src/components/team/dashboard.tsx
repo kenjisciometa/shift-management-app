@@ -63,7 +63,6 @@ import {
   MapPin,
   UsersRound,
   DollarSign,
-  Settings,
   Filter,
   X,
   AlertTriangle,
@@ -370,7 +369,6 @@ export function TeamDashboard({
               <TabsTrigger value="locations">Locations</TabsTrigger>
               <TabsTrigger value="groups">Groups</TabsTrigger>
               <TabsTrigger value="labor-cost">Labor Cost</TabsTrigger>
-              <TabsTrigger value="settings">Settings</TabsTrigger>
             </>
           )}
           {isAdmin && invitations.length > 0 && (
@@ -1014,76 +1012,6 @@ export function TeamDashboard({
           </TabsContent>
         )}
 
-        {/* Settings Tab */}
-        {isAdmin && (
-          <TabsContent value="settings" className="mt-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-semibold">Team Settings</h2>
-                <p className="text-sm text-muted-foreground">
-                  Configure team-wide settings and preferences
-                </p>
-              </div>
-            </div>
-            <div className="grid gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Scheduling Preferences</CardTitle>
-                  <CardDescription>
-                    Default settings for shift scheduling
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Week Start Day</p>
-                      <p className="text-sm text-muted-foreground">First day of the work week</p>
-                    </div>
-                    <Badge variant="outline">Monday</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Default Shift Duration</p>
-                      <p className="text-sm text-muted-foreground">Standard shift length</p>
-                    </div>
-                    <Badge variant="outline">8 hours</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Break Duration</p>
-                      <p className="text-sm text-muted-foreground">Default break time</p>
-                    </div>
-                    <Badge variant="outline">30 minutes</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Notification Settings</CardTitle>
-                  <CardDescription>
-                    Configure team notifications
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Shift Reminders</p>
-                      <p className="text-sm text-muted-foreground">Send reminders before shifts</p>
-                    </div>
-                    <Badge variant="outline">1 hour before</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">Schedule Published</p>
-                      <p className="text-sm text-muted-foreground">Notify when schedule is published</p>
-                    </div>
-                    <Badge variant="outline">Enabled</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-        )}
       </Tabs>
 
       {/* Invite Dialog */}

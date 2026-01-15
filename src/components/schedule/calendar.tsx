@@ -32,6 +32,7 @@ import {
   setHours,
   setMinutes,
   isWithinInterval,
+  differenceInMinutes,
 } from "date-fns";
 import type { Database } from "@/types/database.types";
 import { createClient } from "@/lib/supabase/client";
@@ -69,6 +70,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  TeamSettings,
+  defaultTeamSettings,
+} from "@/components/settings/team-settings";
 
 type ShiftTemplate = Database["public"]["Tables"]["shift_templates"]["Row"];
 
@@ -128,6 +133,7 @@ interface ScheduleCalendarProps {
   isAdmin: boolean;
   currentUserId: string;
   organizationId: string;
+  scheduleSettings?: any;
 }
 
 export function ScheduleCalendar({
@@ -142,10 +148,25 @@ export function ScheduleCalendar({
   isAdmin,
   currentUserId,
   organizationId,
+  scheduleSettings,
 }: ScheduleCalendarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = createClient();
+
+  // Parse schedule settings with defaults
+  const settings: TeamSettings = {
+    ...defaultTeamSettings,
+    ...scheduleSettings,
+  };
+
+  // Helper function to format time based on settings
+  const formatTime = (date: Date) => {
+    if (settings.displayPreferences.timeFormat === "24h") {
+      return format(date, "HH:mm");
+    }
+    return format(date, "h:mm a");
+  };
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null);
@@ -465,14 +486,18 @@ export function ScheduleCalendar({
     }
   };
 
+  // Get week start day from settings (convert string to number for date-fns)
+  const weekStartDayMap: Record<string, 0 | 1 | 6> = { sunday: 0, monday: 1, saturday: 6 };
+  const weekStartDay = weekStartDayMap[settings.displayPreferences.weekStartDay] ?? 0;
+
   const getDateTitle = () => {
     if (view === "month") {
       return format(currentDate, "MMMM yyyy");
     } else if (view === "day") {
       return format(currentDate, "EEEE, MMMM d, yyyy");
     } else {
-      const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-      const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+      const weekStart = startOfWeek(currentDate, { weekStartsOn: weekStartDay });
+      const weekEnd = endOfWeek(currentDate, { weekStartsOn: weekStartDay });
       if (isSameMonth(weekStart, weekEnd)) {
         return `${format(weekStart, "MMMM d")} - ${format(weekEnd, "d, yyyy")}`;
       }
@@ -484,14 +509,14 @@ export function ScheduleCalendar({
     if (view === "month") {
       const monthStart = startOfMonth(currentDate);
       const monthEnd = endOfMonth(currentDate);
-      const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
-      const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
+      const calendarStart = startOfWeek(monthStart, { weekStartsOn: weekStartDay });
+      const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: weekStartDay });
       return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
     } else if (view === "day") {
       return [currentDate];
     } else {
-      const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
-      const weekEnd = endOfWeek(currentDate, { weekStartsOn: 1 });
+      const weekStart = startOfWeek(currentDate, { weekStartsOn: weekStartDay });
+      const weekEnd = endOfWeek(currentDate, { weekStartsOn: weekStartDay });
       return eachDayOfInterval({ start: weekStart, end: weekEnd });
     }
   };
@@ -626,6 +651,7 @@ export function ScheduleCalendar({
               currentUserId={currentUserId}
               selectedShiftIds={selectedShiftIds}
               onSelectChange={handleShiftSelectChange}
+              settings={settings}
             />
           ) : view === "day" ? (
             <DayView
@@ -638,6 +664,7 @@ export function ScheduleCalendar({
               isAdmin={isAdmin}
               selectedShiftIds={selectedShiftIds}
               onSelectChange={handleShiftSelectChange}
+              settings={settings}
             />
           ) : (
             <WeekView
@@ -649,6 +676,7 @@ export function ScheduleCalendar({
               isAdmin={isAdmin}
               selectedShiftIds={selectedShiftIds}
               onSelectChange={handleShiftSelectChange}
+              settings={settings}
             />
           )}
         </div>
@@ -657,7 +685,7 @@ export function ScheduleCalendar({
         <DragOverlay>
           {activeShift && (
             <div className="opacity-80">
-              <DraggableShift shift={activeShift} isDraggable={false} />
+              <DraggableShift shift={activeShift} isDraggable={false} settings={settings} viewType={view} />
             </div>
           )}
         </DragOverlay>
@@ -705,6 +733,7 @@ function MonthView({
   currentUserId,
   selectedShiftIds,
   onSelectChange,
+  settings,
 }: {
   days: Date[];
   currentDate: Date;
@@ -716,8 +745,13 @@ function MonthView({
   currentUserId: string;
   selectedShiftIds: Set<string>;
   onSelectChange: (shiftId: string, selected: boolean) => void;
+  settings: TeamSettings;
 }) {
-  const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // Generate weekDays array based on weekStartDay
+  const allDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekStartDayMap: Record<string, number> = { sunday: 0, monday: 1, saturday: 6 };
+  const weekStartIndex = weekStartDayMap[settings.displayPreferences.weekStartDay] ?? 0;
+  const weekDays = [...allDays.slice(weekStartIndex), ...allDays.slice(0, weekStartIndex)];
 
   const ptoTypeColors: Record<string, string> = {
     vacation: "bg-blue-500",
@@ -783,6 +817,8 @@ function MonthView({
                   onClick={() => onEditShift(shift)}
                   isSelected={selectedShiftIds.has(shift.id)}
                   onSelectChange={onSelectChange}
+                  settings={settings}
+                  viewType="month"
                 />
               ))}
               {dayShifts.length > 3 && (
@@ -865,6 +901,7 @@ function WeekView({
   isAdmin,
   selectedShiftIds,
   onSelectChange,
+  settings,
 }: {
   days: Date[];
   shifts: Shift[];
@@ -874,8 +911,13 @@ function WeekView({
   isAdmin: boolean;
   selectedShiftIds: Set<string>;
   onSelectChange: (shiftId: string, selected: boolean) => void;
+  settings: TeamSettings;
 }) {
-  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  // Generate weekDays array based on weekStartDay
+  const allDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekStartDayMap: Record<string, number> = { sunday: 0, monday: 1, saturday: 6 };
+  const weekStartIndex = weekStartDayMap[settings.displayPreferences.weekStartDay] ?? 0;
+  const weekDays = [...allDays.slice(weekStartIndex), ...allDays.slice(0, weekStartIndex)];
 
   const getShiftsForMemberAndDay = (memberId: string, date: Date) => {
     return shifts.filter((shift) => {
@@ -954,6 +996,8 @@ function WeekView({
                         }}
                         isSelected={selectedShiftIds.has(shift.id)}
                         onSelectChange={onSelectChange}
+                        settings={settings}
+                        viewType="week"
                       />
                     ))}
                   </DroppableWeekCell>
@@ -978,6 +1022,7 @@ function DayView({
   isAdmin,
   selectedShiftIds,
   onSelectChange,
+  settings,
 }: {
   date: Date;
   shifts: Shift[];
@@ -988,6 +1033,7 @@ function DayView({
   isAdmin: boolean;
   selectedShiftIds: Set<string>;
   onSelectChange: (shiftId: string, selected: boolean) => void;
+  settings: TeamSettings;
 }) {
   // Hours from 6AM to 12AM (midnight) = 6 to 24
   const hours = Array.from({ length: 19 }, (_, i) => i + 6); // 6, 7, 8, ... 24
@@ -1018,6 +1064,22 @@ function DayView({
   const getDisplayName = (member: TeamMember) => {
     if (member.display_name) return member.display_name;
     return `${member.first_name} ${member.last_name}`;
+  };
+
+  // Time formatting based on settings
+  const formatTimeValue = (date: Date) => {
+    if (settings.displayPreferences.timeFormat === "24h") {
+      return format(date, "HH:mm");
+    }
+    return format(date, "h:mm a");
+  };
+
+  const formatHourHeader = (hour: number) => {
+    if (hour === 24) return settings.displayPreferences.timeFormat === "24h" ? "00:00" : "12AM";
+    if (settings.displayPreferences.timeFormat === "24h") {
+      return `${hour.toString().padStart(2, "0")}:00`;
+    }
+    return format(new Date().setHours(hour, 0), "ha");
   };
 
   const getShiftPosition = useCallback((
@@ -1289,7 +1351,7 @@ function DayView({
                 key={hour}
                 className="flex-1 p-1 text-center text-xs text-muted-foreground border-r last:border-r-0"
               >
-                {hour === 24 ? "12AM" : format(new Date().setHours(hour, 0), "ha")}
+                {formatHourHeader(hour)}
               </div>
             ))}
           </div>
@@ -1399,7 +1461,14 @@ function DayView({
                           }}
                         >
                           <div className="opacity-80">
-                            {format(displayStartTime, "h:mm")} - {format(displayEndTime, "h:mm a")}
+                            {formatTimeValue(displayStartTime)} - {formatTimeValue(displayEndTime)}
+                            {(() => {
+                              const durationMins = differenceInMinutes(displayEndTime, displayStartTime);
+                              const hours = Math.floor(durationMins / 60);
+                              const mins = durationMins % 60;
+                              const durationText = mins === 0 ? `${hours}H` : `${hours}H${mins}M`;
+                              return <span className="ml-1">・{durationText}</span>;
+                            })()}
                           </div>
                           {shift.positions && (
                             <div className="opacity-80 truncate">{shift.positions.name}</div>
@@ -1441,13 +1510,13 @@ function DayView({
                       <p>
                         Move shift from{" "}
                         <strong>
-                          {format(parseISO(pendingUpdate.shift.start_time), "h:mm a")} -{" "}
-                          {format(parseISO(pendingUpdate.shift.end_time), "h:mm a")}
+                          {formatTimeValue(parseISO(pendingUpdate.shift.start_time))} -{" "}
+                          {formatTimeValue(parseISO(pendingUpdate.shift.end_time))}
                         </strong>{" "}
                         to{" "}
                         <strong>
-                          {format(pendingUpdate.newStartTime, "h:mm a")} -{" "}
-                          {format(pendingUpdate.newEndTime, "h:mm a")}
+                          {formatTimeValue(pendingUpdate.newStartTime)} -{" "}
+                          {formatTimeValue(pendingUpdate.newEndTime)}
                         </strong>
                         ?
                       </p>
@@ -1456,13 +1525,13 @@ function DayView({
                         <p>
                           {pendingUpdate.type === 'resize-start' ? 'Change start time' : 'Change end time'} from{" "}
                           <strong>
-                            {format(parseISO(pendingUpdate.shift.start_time), "h:mm a")} -{" "}
-                            {format(parseISO(pendingUpdate.shift.end_time), "h:mm a")}
+                            {formatTimeValue(parseISO(pendingUpdate.shift.start_time))} -{" "}
+                            {formatTimeValue(parseISO(pendingUpdate.shift.end_time))}
                           </strong>{" "}
                           to{" "}
                           <strong>
-                            {format(pendingUpdate.newStartTime, "h:mm a")} -{" "}
-                            {format(pendingUpdate.newEndTime, "h:mm a")}
+                            {formatTimeValue(pendingUpdate.newStartTime)} -{" "}
+                            {formatTimeValue(pendingUpdate.newEndTime)}
                           </strong>
                           ?
                         </p>

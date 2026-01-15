@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import type { Database } from "@/types/database.types";
@@ -68,11 +69,6 @@ const mainNavItems = [
     title: "Schedule",
     href: "/schedule",
     icon: Calendar,
-  },
-  {
-    title: "Time Clock",
-    href: "/time-clock",
-    icon: Clock,
   },
   {
     title: "Timesheets",
@@ -166,8 +162,17 @@ export function DashboardNav({ user, profile }: DashboardNavProps) {
     <Sidebar>
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Clock className="h-4 w-4" />
+          <div className="relative flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground overflow-hidden">
+            {profile?.organizations?.logo_url ? (
+              <Image
+                src={profile.organizations.logo_url}
+                alt={profile.organizations.name || "Organization logo"}
+                fill
+                className="object-cover"
+              />
+            ) : (
+              <Clock className="h-4 w-4" />
+            )}
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-semibold">

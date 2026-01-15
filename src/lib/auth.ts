@@ -31,7 +31,7 @@ export const getAuthData = cache(async (): Promise<AuthData | null> => {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("*, organizations(*)")
+    .select("*, organizations!profiles_organization_id_fkey(*)")
     .eq("id", user.id)
     .single();
 

@@ -49,6 +49,7 @@ export default async function ChatPage() {
     id: string;
     user_id: string;
     role: string | null;
+    last_read_at: string | null;
     profiles: {
       id: string;
       first_name: string;
@@ -77,6 +78,7 @@ export default async function ChatPage() {
           room_id,
           user_id,
           role,
+          last_read_at,
           profiles!chat_participants_user_id_fkey (
             id,
             first_name,
@@ -109,6 +111,7 @@ export default async function ChatPage() {
           id: p.id,
           user_id: p.user_id,
           role: p.role,
+          last_read_at: p.last_read_at,
           profiles: p.profiles,
         });
       });

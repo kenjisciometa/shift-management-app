@@ -36,8 +36,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Loader2, Shield, AlertTriangle, X, Check } from "lucide-react";
+import { Loader2, Shield, AlertTriangle, X, Check, Clock, Edit } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -93,10 +94,13 @@ export function EmployeeDialog({
     lastName: "",
     displayName: "",
     phone: "",
+    employeeCode: "",
     role: "employee",
     departmentId: "",
     status: "active",
     positionIds: [] as string[],
+    allowTimeEdit: false,
+    autoClockOutEnabled: false,
   });
 
   useEffect(() => {
@@ -107,10 +111,13 @@ export function EmployeeDialog({
         lastName: employee.last_name,
         displayName: employee.display_name || "",
         phone: employee.phone || "",
+        employeeCode: employee.employee_code || "",
         role: employee.role || "employee",
         departmentId: employee.department_id || "",
         status: employee.status || "active",
         positionIds: currentPositionIds,
+        allowTimeEdit: employee.allow_time_edit || false,
+        autoClockOutEnabled: employee.auto_clock_out_enabled || false,
       });
     }
   }, [open, employee?.id]);
@@ -154,7 +161,10 @@ export function EmployeeDialog({
         last_name: formData.lastName.trim(),
         display_name: formData.displayName.trim() || null,
         phone: formData.phone.trim() || null,
+        employee_code: formData.employeeCode.trim() || null,
         department_id: formData.departmentId || null,
+        allow_time_edit: formData.allowTimeEdit,
+        auto_clock_out_enabled: formData.autoClockOutEnabled,
       };
 
       // Only update role if allowed
@@ -354,6 +364,18 @@ export function EmployeeDialog({
             </div>
 
             <div className="space-y-2">
+              <Label htmlFor="employeeCode">Personal ID (optional)</Label>
+              <Input
+                id="employeeCode"
+                placeholder="EMP001"
+                value={formData.employeeCode}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, employeeCode: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="department">Department</Label>
               <Select
                 value={formData.departmentId || "none"}
@@ -507,6 +529,60 @@ export function EmployeeDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <Separator />
+
+            {/* Time Clock Settings */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <Label>Time Clock Settings</Label>
+              </div>
+
+              {/* Allow Time Edit */}
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Edit className="h-4 w-4 text-muted-foreground" />
+                    <Label htmlFor="allowTimeEdit" className="font-medium">
+                      Allow Time Edit
+                    </Label>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Allow this employee to edit their clock-in/out times in Timesheets
+                  </p>
+                </div>
+                <Switch
+                  id="allowTimeEdit"
+                  checked={formData.allowTimeEdit}
+                  onCheckedChange={(checked) =>
+                    setFormData((prev) => ({ ...prev, allowTimeEdit: checked }))
+                  }
+                />
+              </div>
+
+              {/* Auto Clock-Out */}
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <Label htmlFor="autoClockOut" className="font-medium">
+                      Auto Clock-Out
+                    </Label>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Automatically clock out this employee if they forget
+                  </p>
+                </div>
+                <Switch
+                  id="autoClockOut"
+                  checked={formData.autoClockOutEnabled}
+                  onCheckedChange={(checked) =>
+                    setFormData((prev) => ({ ...prev, autoClockOutEnabled: checked }))
+                  }
+                />
+              </div>
             </div>
           </form>
           </div>

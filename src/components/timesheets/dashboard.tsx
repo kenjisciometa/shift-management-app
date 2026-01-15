@@ -173,6 +173,18 @@ export function TimesheetsDashboard({
   const handleGenerateTimesheet = async () => {
     setIsGenerating(true);
     try {
+      // Check if timesheet already exists for this period
+      const checkResponse = await fetch(
+        `/api/timesheets?period_start=${format(currentWeekStart, "yyyy-MM-dd")}&period_end=${format(currentWeekEnd, "yyyy-MM-dd")}&user_id=${profile.id}`
+      );
+      const checkData = await checkResponse.json();
+
+      if (checkData.data && checkData.data.length > 0) {
+        toast.info("Timesheet already exists for this period");
+        router.refresh();
+        return;
+      }
+
       const response = await fetch("/api/timesheets/generate", {
         method: "POST",
         headers: {

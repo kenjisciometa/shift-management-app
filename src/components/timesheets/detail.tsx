@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { format, parseISO, differenceInMinutes, eachDayOfInterval, isSameDay } from "date-fns";
+import { format, parseISO, differenceInMinutes, eachDayOfInterval, isSameDay, setHours, setMinutes } from "date-fns";
 import type { Database } from "@/types/database.types";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,6 +34,9 @@ import {
   XCircle,
   AlertCircle,
   Download,
+  Pencil,
+  Loader2,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -40,6 +45,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Timesheet = Database["public"]["Tables"]["timesheets"]["Row"] & {
@@ -50,7 +65,7 @@ type Timesheet = Database["public"]["Tables"]["timesheets"]["Row"] & {
     display_name: string | null;
     avatar_url: string | null;
   } | null;
-  profiles_timesheets_reviewed_by_fkey: {
+  profiles_timesheets_reviewed_by_fkey?: {
     id: string;
     first_name: string;
     last_name: string;
@@ -86,11 +101,28 @@ const statusIcons: Record<string, typeof CheckCircle2> = {
 
 export function TimesheetDetail({
   timesheet,
-  timeEntries,
+  timeEntries: initialTimeEntries,
   profile,
   isAdmin,
 }: TimesheetDetailProps) {
   const router = useRouter();
+  const supabase = createClient();
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(initialTimeEntries);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<{
+    entryId: string;
+    type: "clock_in" | "clock_out";
+    currentTime: Date;
+    dateKey: string;
+  } | null>(null);
+  const [editTime, setEditTime] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isResubmitting, setIsResubmitting] = useState(false);
+
+  // Check if user can edit time entries
+  const canEditTime = profile.allow_time_edit || isAdmin;
+  // Only allow editing own timesheet unless admin
+  const canEditThisTimesheet = isAdmin || (timesheet.user_id === profile.id && canEditTime);
 
   const formatHours = (hours: number) => {
     const h = Math.floor(hours);
@@ -121,6 +153,8 @@ export function TimesheetDetail({
         date: Date;
         clockIn: Date | null;
         clockOut: Date | null;
+        clockInEntryId: string | null;
+        clockOutEntryId: string | null;
         breaks: Array<{ start: Date; end: Date; duration: number }>;
         totalWorkMinutes: number;
         totalBreakMinutes: number;
@@ -141,6 +175,8 @@ export function TimesheetDetail({
           date: entryTime,
           clockIn: null,
           clockOut: null,
+          clockInEntryId: null,
+          clockOutEntryId: null,
           breaks: [],
           totalWorkMinutes: 0,
           totalBreakMinutes: 0,
@@ -153,11 +189,13 @@ export function TimesheetDetail({
         case "clock_in":
           currentClockIn = entryTime;
           breakdown[dateKey].clockIn = entryTime;
+          breakdown[dateKey].clockInEntryId = entry.id;
           breakdown[dateKey].location = entry.locations?.name || breakdown[dateKey].location;
           break;
         case "clock_out":
           if (currentClockIn) {
             breakdown[dateKey].clockOut = entryTime;
+            breakdown[dateKey].clockOutEntryId = entry.id;
             const workMinutes = differenceInMinutes(entryTime, currentClockIn);
             const breakMinutes = dayBreaks[dateKey].reduce(
               (sum, b) => sum + differenceInMinutes(b.end, b.start),
@@ -192,6 +230,99 @@ export function TimesheetDetail({
       a.date.getTime() - b.date.getTime()
     );
   })();
+
+  // Calculate actual totals from time entries (not stored values)
+  const calculatedTotals = (() => {
+    const totalWorkMinutes = dailyBreakdown.reduce(
+      (sum, day) => sum + day.totalWorkMinutes,
+      0
+    );
+    const totalBreakMinutes = dailyBreakdown.reduce(
+      (sum, day) => sum + day.totalBreakMinutes,
+      0
+    );
+    // Overtime is calculated as hours exceeding 40 per week
+    const regularHoursLimit = 40 * 60; // 40 hours in minutes
+    const overtimeMinutes = Math.max(0, totalWorkMinutes - regularHoursLimit);
+
+    return {
+      totalHours: totalWorkMinutes / 60,
+      breakHours: totalBreakMinutes / 60,
+      overtimeHours: overtimeMinutes / 60,
+    };
+  })();
+
+  // Handle opening the edit dialog
+  const handleEditTime = (
+    entryId: string,
+    type: "clock_in" | "clock_out",
+    currentTime: Date,
+    dateKey: string
+  ) => {
+    setEditingEntry({ entryId, type, currentTime, dateKey });
+    setEditTime(format(currentTime, "HH:mm"));
+    setEditDialogOpen(true);
+  };
+
+  // Handle saving the edited time
+  const handleSaveTime = async () => {
+    if (!editingEntry || !editTime) return;
+
+    setIsSaving(true);
+    try {
+      const [hours, minutes] = editTime.split(":").map(Number);
+      const newTimestamp = setMinutes(setHours(editingEntry.currentTime, hours), minutes);
+
+      const { error } = await supabase
+        .from("time_entries")
+        .update({ timestamp: newTimestamp.toISOString() })
+        .eq("id", editingEntry.entryId);
+
+      if (error) throw error;
+
+      // Update local state
+      setTimeEntries((prev) =>
+        prev.map((entry) =>
+          entry.id === editingEntry.entryId
+            ? { ...entry, timestamp: newTimestamp.toISOString() }
+            : entry
+        )
+      );
+
+      toast.success(`${editingEntry.type === "clock_in" ? "Clock In" : "Clock Out"} time updated`);
+      setEditDialogOpen(false);
+      setEditingEntry(null);
+    } catch (error) {
+      console.error("Error updating time entry:", error);
+      toast.error("Failed to update time entry");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle resubmitting a rejected timesheet
+  const handleResubmit = async () => {
+    setIsResubmitting(true);
+    try {
+      const response = await fetch(`/api/timesheets/${timesheet.id}/submit`, {
+        method: "PUT",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to resubmit timesheet");
+      }
+
+      toast.success("Timesheet resubmitted for approval");
+      router.refresh();
+    } catch (error) {
+      console.error("Error resubmitting timesheet:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to resubmit timesheet");
+    } finally {
+      setIsResubmitting(false);
+    }
+  };
 
   const handlePrint = () => {
     window.print();
@@ -245,7 +376,7 @@ export function TimesheetDetail({
     ]);
     rows.push([
       "Total Hours",
-      formatHours(Number(timesheet.total_hours || 0)),
+      formatHours(calculatedTotals.totalHours),
       "",
       "",
       "",
@@ -255,7 +386,7 @@ export function TimesheetDetail({
     ]);
     rows.push([
       "Break Hours",
-      formatHours(Number(timesheet.break_hours || 0)),
+      formatHours(calculatedTotals.breakHours),
       "",
       "",
       "",
@@ -265,7 +396,7 @@ export function TimesheetDetail({
     ]);
     rows.push([
       "Overtime Hours",
-      formatHours(Number(timesheet.overtime_hours || 0)),
+      formatHours(calculatedTotals.overtimeHours),
       "",
       "",
       "",
@@ -332,6 +463,20 @@ export function TimesheetDetail({
           Back to Timesheets
         </Button>
         <div className="flex items-center gap-2">
+          {/* Resubmit button for rejected timesheets */}
+          {timesheet.status === "rejected" && timesheet.user_id === profile.id && (
+            <Button
+              onClick={handleResubmit}
+              disabled={isResubmitting}
+            >
+              {isResubmitting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-2" />
+              )}
+              Resubmit
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" className="gap-2">
@@ -409,19 +554,19 @@ export function TimesheetDetail({
                 Total Hours
               </div>
               <div className="text-lg font-semibold">
-                {formatHours(Number(timesheet.total_hours || 0))}
+                {formatHours(calculatedTotals.totalHours)}
               </div>
             </div>
             <div className="space-y-1">
               <div className="text-sm text-muted-foreground">Break Hours</div>
               <div className="text-lg font-semibold">
-                {formatHours(Number(timesheet.break_hours || 0))}
+                {formatHours(calculatedTotals.breakHours)}
               </div>
             </div>
             <div className="space-y-1">
               <div className="text-sm text-muted-foreground">Overtime</div>
               <div className="text-lg font-semibold text-orange-500">
-                {formatHours(Number(timesheet.overtime_hours || 0))}
+                {formatHours(calculatedTotals.overtimeHours)}
               </div>
             </div>
           </div>
@@ -511,31 +656,72 @@ export function TimesheetDetail({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {dailyBreakdown.map((day, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="font-medium">
-                        {format(day.date, "EEE, MMM d, yyyy")}
-                      </TableCell>
-                      <TableCell>{day.location || "-"}</TableCell>
-                      <TableCell>
-                        {day.clockIn ? formatTime(day.clockIn) : "-"}
-                      </TableCell>
-                      <TableCell>
-                        {day.clockOut ? formatTime(day.clockOut) : "-"}
-                      </TableCell>
-                      <TableCell className="text-right font-medium">
-                        {formatHours(day.totalWorkMinutes / 60)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatHours(day.totalBreakMinutes / 60)}
-                      </TableCell>
-                      <TableCell className="text-right text-sm text-muted-foreground">
-                        {day.breaks.length > 0
-                          ? `${day.breaks.length} break${day.breaks.length > 1 ? "s" : ""}`
-                          : "-"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {dailyBreakdown.map((day, index) => {
+                    const dateKey = format(day.date, "yyyy-MM-dd");
+                    return (
+                      <TableRow key={index}>
+                        <TableCell className="font-medium">
+                          {format(day.date, "EEE, MMM d, yyyy")}
+                        </TableCell>
+                        <TableCell>{day.location || "-"}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {day.clockIn ? formatTime(day.clockIn) : "-"}
+                            {canEditThisTimesheet && day.clockIn && day.clockInEntryId && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 print:hidden"
+                                onClick={() =>
+                                  handleEditTime(
+                                    day.clockInEntryId!,
+                                    "clock_in",
+                                    day.clockIn!,
+                                    dateKey
+                                  )
+                                }
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {day.clockOut ? formatTime(day.clockOut) : "-"}
+                            {canEditThisTimesheet && day.clockOut && day.clockOutEntryId && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 print:hidden"
+                                onClick={() =>
+                                  handleEditTime(
+                                    day.clockOutEntryId!,
+                                    "clock_out",
+                                    day.clockOut!,
+                                    dateKey
+                                  )
+                                }
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {formatHours(day.totalWorkMinutes / 60)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatHours(day.totalBreakMinutes / 60)}
+                        </TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">
+                          {day.breaks.length > 0
+                            ? `${day.breaks.length} break${day.breaks.length > 1 ? "s" : ""}`
+                            : "-"}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -547,6 +733,49 @@ export function TimesheetDetail({
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Time Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>
+              Edit {editingEntry?.type === "clock_in" ? "Clock In" : "Clock Out"} Time
+            </DialogTitle>
+            <DialogDescription>
+              Update the time for this entry. Changes will be reflected in the timesheet.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-time">Time</Label>
+              <Input
+                id="edit-time"
+                type="time"
+                value={editTime}
+                onChange={(e) => setEditTime(e.target.value)}
+              />
+            </div>
+            {editingEntry && (
+              <p className="text-sm text-muted-foreground">
+                Date: {format(editingEntry.currentTime, "EEEE, MMMM d, yyyy")}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveTime} disabled={isSaving}>
+              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Print Styles */}
       <style jsx global>{`

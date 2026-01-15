@@ -205,16 +205,16 @@ export function DepartmentDialog({
           <div className="space-y-2">
             <Label htmlFor="manager">Department Manager</Label>
             <Select
-              value={formData.managerId}
+              value={formData.managerId || "none"}
               onValueChange={(value) =>
-                setFormData((prev) => ({ ...prev, managerId: value }))
+                setFormData((prev) => ({ ...prev, managerId: value === "none" ? "" : value }))
               }
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select a manager" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">No manager</SelectItem>
+                <SelectItem value="none">No manager</SelectItem>
                 {teamMembers.map((member) => (
                   <SelectItem key={member.id} value={member.id}>
                     {getDisplayName(member)} ({member.role})

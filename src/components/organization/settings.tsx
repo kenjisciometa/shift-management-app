@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,9 @@ import {
   Globe,
   Map,
   List,
+  Upload,
+  X,
+  ImageIcon,
 } from "lucide-react";
 import { LocationDialog } from "./location-dialog";
 import { DepartmentDialog } from "./department-dialog";
@@ -78,14 +82,27 @@ interface OrganizationSettingsProps {
 }
 
 const timezones = [
-  { value: "Asia/Tokyo", label: "Tokyo (JST)" },
-  { value: "America/New_York", label: "New York (EST)" },
+  { value: "Pacific/Honolulu", label: "Honolulu (HST)" },
+  { value: "America/Anchorage", label: "Anchorage (AKST)" },
   { value: "America/Los_Angeles", label: "Los Angeles (PST)" },
+  { value: "America/Denver", label: "Denver (MST)" },
   { value: "America/Chicago", label: "Chicago (CST)" },
+  { value: "America/New_York", label: "New York (EST)" },
+  { value: "America/Sao_Paulo", label: "São Paulo (BRT)" },
   { value: "Europe/London", label: "London (GMT)" },
   { value: "Europe/Paris", label: "Paris (CET)" },
+  { value: "Europe/Berlin", label: "Berlin (CET)" },
+  { value: "Europe/Helsinki", label: "Helsinki (EET)" },
+  { value: "Europe/Moscow", label: "Moscow (MSK)" },
+  { value: "Asia/Dubai", label: "Dubai (GST)" },
+  { value: "Asia/Kolkata", label: "Mumbai (IST)" },
+  { value: "Asia/Bangkok", label: "Bangkok (ICT)" },
   { value: "Asia/Singapore", label: "Singapore (SGT)" },
+  { value: "Asia/Hong_Kong", label: "Hong Kong (HKT)" },
+  { value: "Asia/Tokyo", label: "Tokyo (JST)" },
+  { value: "Asia/Seoul", label: "Seoul (KST)" },
   { value: "Australia/Sydney", label: "Sydney (AEST)" },
+  { value: "Pacific/Auckland", label: "Auckland (NZST)" },
 ];
 
 export function OrganizationSettings({
@@ -106,6 +123,141 @@ export function OrganizationSettings({
     name: organization.name,
     timezone: organization.timezone || "Asia/Tokyo",
   });
+
+  // Logo upload state
+  const [logoUrl, setLogoUrl] = useState<string | null>(organization.logo_url);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Allowed image formats and max size
+  const ALLOWED_FORMATS = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+  const MAX_FILE_SIZE = 3.5 * 1024 * 1024; // 3.5MB
+
+  const validateFile = (file: File): string | null => {
+    if (!ALLOWED_FORMATS.includes(file.type)) {
+      return "Invalid file format. Please upload JPG, PNG, GIF, or WebP.";
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      return "File size exceeds 3.5MB limit.";
+    }
+    return null;
+  };
+
+  const uploadLogo = async (file: File) => {
+    const error = validateFile(file);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
+    setUploadingLogo(true);
+    try {
+      // Generate unique filename
+      const fileExt = file.name.split(".").pop();
+      const fileName = `${organization.id}-${Date.now()}.${fileExt}`;
+      const filePath = `logos/${fileName}`;
+
+      // Delete old logo if exists
+      if (logoUrl) {
+        const oldPath = logoUrl.split("/organization-logos/")[1];
+        if (oldPath) {
+          await supabase.storage.from("organization-logos").remove([oldPath]);
+        }
+      }
+
+      // Upload new logo
+      const { error: uploadError } = await supabase.storage
+        .from("organization-logos")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from("organization-logos")
+        .getPublicUrl(filePath);
+
+      const newLogoUrl = urlData.publicUrl;
+
+      // Update organization record
+      const { error: updateError } = await supabase
+        .from("organizations")
+        .update({ logo_url: newLogoUrl })
+        .eq("id", organization.id);
+
+      if (updateError) throw updateError;
+
+      setLogoUrl(newLogoUrl);
+      toast.success("Logo uploaded successfully");
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to upload logo");
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const removeLogo = async () => {
+    if (!logoUrl) return;
+
+    setUploadingLogo(true);
+    try {
+      // Delete from storage
+      const oldPath = logoUrl.split("/organization-logos/")[1];
+      if (oldPath) {
+        await supabase.storage.from("organization-logos").remove([oldPath]);
+      }
+
+      // Update organization record
+      const { error } = await supabase
+        .from("organizations")
+        .update({ logo_url: null })
+        .eq("id", organization.id);
+
+      if (error) throw error;
+
+      setLogoUrl(null);
+      toast.success("Logo removed");
+      router.refresh();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to remove logo");
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadLogo(file);
+    }
+  };
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      uploadLogo(file);
+    }
+  }, []);
 
   // Dialogs
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
@@ -214,6 +366,72 @@ export function OrganizationSettings({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Logo Upload */}
+              <div className="space-y-2">
+                <Label>Organization Logo</Label>
+                <div className="flex items-start gap-4">
+                  {/* Logo Preview */}
+                  <div className="relative h-24 w-24 rounded-lg border bg-muted flex items-center justify-center overflow-hidden">
+                    {logoUrl ? (
+                      <>
+                        <Image
+                          src={logoUrl}
+                          alt="Organization logo"
+                          fill
+                          className="object-cover"
+                        />
+                        <button
+                          onClick={removeLogo}
+                          disabled={uploadingLogo}
+                          className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:bg-destructive/90 transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                    )}
+                  </div>
+
+                  {/* Drop Zone */}
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`flex-1 border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                      isDragging
+                        ? "border-primary bg-primary/5"
+                        : "border-muted-foreground/25 hover:border-primary/50"
+                    }`}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                    {uploadingLogo ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p className="text-sm text-muted-foreground">Uploading...</p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-2">
+                        <Upload className="h-8 w-8 text-muted-foreground" />
+                        <p className="text-sm font-medium">
+                          Drop your logo here or click to browse
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          JPG, PNG, GIF, or WebP. Max 3.5MB
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="orgName">Organization Name</Label>
                 <Input

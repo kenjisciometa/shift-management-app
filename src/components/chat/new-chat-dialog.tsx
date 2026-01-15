@@ -151,9 +151,16 @@ export function NewChatDialog({
       onOpenChange(false);
       resetForm();
       router.refresh();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to create chat");
+    } catch (error: unknown) {
+      const err = error as { message?: string; code?: string; details?: string; hint?: string };
+      console.error("Chat creation error:", {
+        message: err?.message,
+        code: err?.code,
+        details: err?.details,
+        hint: err?.hint,
+        raw: error,
+      });
+      toast.error(err?.message || "Failed to create chat");
     } finally {
       setLoading(false);
     }
@@ -209,9 +216,16 @@ export function NewChatDialog({
       onOpenChange(false);
       resetForm();
       router.refresh();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to create group");
+    } catch (error: unknown) {
+      const err = error as { message?: string; code?: string; details?: string; hint?: string };
+      console.error("Group creation error:", {
+        message: err?.message,
+        code: err?.code,
+        details: err?.details,
+        hint: err?.hint,
+        raw: error,
+      });
+      toast.error(err?.message || "Failed to create group");
     } finally {
       setLoading(false);
     }

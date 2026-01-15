@@ -8,6 +8,10 @@ import type { Database } from "@/types/database.types";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { GripVertical } from "lucide-react";
+import {
+  TeamSettings,
+  defaultTeamSettings,
+} from "@/components/settings/team-settings";
 
 type Shift = Database["public"]["Tables"]["shifts"]["Row"] & {
   profiles: {
@@ -28,6 +32,8 @@ interface DraggableShiftProps {
   isDraggable?: boolean;
   isSelected?: boolean;
   onSelectChange?: (shiftId: string, selected: boolean) => void;
+  settings?: TeamSettings;
+  viewType?: "day" | "week" | "month";
 }
 
 const shiftColors: Record<string, { published: string; draft: string }> = {
@@ -97,6 +103,8 @@ export function DraggableShift({
   isDraggable = true,
   isSelected = false,
   onSelectChange,
+  settings = defaultTeamSettings,
+  viewType = "month",
 }: DraggableShiftProps) {
   const [mounted, setMounted] = useState(false);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -126,6 +134,53 @@ export function DraggableShift({
     if (!shift.profiles) return "Unassigned";
     if (shift.profiles.display_name) return shift.profiles.display_name;
     return `${shift.profiles.first_name} ${shift.profiles.last_name}`;
+  };
+
+  // Format time based on settings
+  const formatTimeValue = (date: Date) => {
+    if (settings.displayPreferences.timeFormat === "24h") {
+      return format(date, "HH:mm");
+    }
+    return format(date, "h:mm a");
+  };
+
+  // Get appearance settings for current view
+  const appearanceSettings = settings.shiftAppearance[viewType] || settings.shiftAppearance.month;
+
+  // Helper to check if a field is visible
+  const isFieldVisible = (field: "time" | "position" | "location" | "name") => {
+    const fieldConfig = appearanceSettings.find((f) => f.field === field);
+    return fieldConfig ? fieldConfig.visible : true;
+  };
+
+  // Render fields in order from settings
+  const renderFields = () => {
+    return appearanceSettings
+      .filter((fieldConfig) => fieldConfig.visible)
+      .map((fieldConfig) => {
+        switch (fieldConfig.field) {
+          case "time":
+            return (
+              <div key="time" className="text-[10px] opacity-80 whitespace-nowrap">
+                {formatTimeValue(startTime)} - {formatTimeValue(endTime)}・{durationText}
+              </div>
+            );
+          case "position":
+            return shift.positions ? (
+              <div key="position" className="text-xs opacity-80 truncate">{shift.positions.name}</div>
+            ) : null;
+          case "location":
+            return shift.locations ? (
+              <div key="location" className="text-xs opacity-80 truncate">{shift.locations.name}</div>
+            ) : null;
+          case "name":
+            return (
+              <div key="name" className="font-medium text-sm truncate">{getDisplayName()}</div>
+            );
+          default:
+            return null;
+        }
+      });
   };
 
   const isPublished = shift.is_published ?? false;
@@ -173,13 +228,7 @@ export function DraggableShift({
           </div>
         )}
         <div className="flex-1 min-w-0">
-          <div className="text-[10px] opacity-80 whitespace-nowrap">
-            {format(startTime, "h:mm")} - {format(endTime, "h:mm a")}・{durationText}
-          </div>
-          {shift.positions && (
-            <div className="text-xs opacity-80 truncate">{shift.positions.name}</div>
-          )}
-          <div className="font-medium text-sm truncate">{getDisplayName()}</div>
+          {renderFields()}
         </div>
       </div>
     </div>

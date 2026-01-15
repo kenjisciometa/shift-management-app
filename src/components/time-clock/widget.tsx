@@ -156,7 +156,10 @@ export function TimeClockWidget({
     }
 
     if (entryType === "clock_in" && isWithinGeofence === false && selectedLocation?.geofence_enabled && !selectedLocation?.allow_clock_outside) {
-      toast.error("You must be within the work location to clock in");
+      toast.error("You must be within the work location to clock in", {
+        duration: 5000,
+        className: "!text-xl !p-6 !min-w-[400px]",
+      });
       return;
     }
 

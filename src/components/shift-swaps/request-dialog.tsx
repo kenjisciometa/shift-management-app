@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { ja } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import {
@@ -66,6 +66,7 @@ export function SwapRequestDialog({
   myShifts,
   teamMembers,
 }: SwapRequestDialogProps) {
+  const router = useRouter();
   const supabase = createClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedShiftId, setSelectedShiftId] = useState<string>("");
@@ -96,7 +97,7 @@ export function SwapRequestDialog({
   const formatShiftTime = (shift: Shift) => {
     const start = new Date(shift.start_time);
     const end = new Date(shift.end_time);
-    return `${format(start, "M/d (E)", { locale: ja })} ${format(start, "HH:mm")} - ${format(end, "HH:mm")}`;
+    return `${format(start, "M/d (EEE)")} ${format(start, "h:mm a")} - ${format(end, "h:mm a")}`;
   };
 
   // Load target user's shifts when target is selected
@@ -126,7 +127,7 @@ export function SwapRequestDialog({
       setTargetShifts(data || []);
     } catch (error) {
       console.error("Error loading target shifts:", error);
-      toast.error("相手のシフトの取得に失敗しました");
+      toast.error("Failed to load target's shifts");
     } finally {
       setLoadingTargetShifts(false);
     }
@@ -134,12 +135,12 @@ export function SwapRequestDialog({
 
   const handleSubmit = async () => {
     if (!selectedShiftId) {
-      toast.error("交換するシフトを選択してください");
+      toast.error("Please select a shift to swap");
       return;
     }
 
     if (!selectedTargetId) {
-      toast.error("交換相手を選択してください");
+      toast.error("Please select a swap partner");
       return;
     }
 
@@ -157,15 +158,15 @@ export function SwapRequestDialog({
 
       if (error) throw error;
 
-      toast.success("シフト交換リクエストを送信しました");
+      toast.success("Shift swap request sent");
       onOpenChange(false);
       resetForm();
 
       // Refresh the page to show new request
-      window.location.reload();
-    } catch (error) {
-      console.error("Error creating swap request:", error);
-      toast.error("リクエストの送信に失敗しました");
+      router.refresh();
+    } catch (error: any) {
+      console.error("Error creating swap request:", error?.message || error?.code || error);
+      toast.error(error?.message || "Failed to send request");
     } finally {
       setIsSubmitting(false);
     }
@@ -196,25 +197,25 @@ export function SwapRequestDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowRightLeft className="h-5 w-5" />
-            シフト交換リクエスト
+            Request Shift Swap
           </DialogTitle>
           <DialogDescription>
-            他のスタッフとシフトを交換するリクエストを送信します
+            Send a request to swap shifts with another staff member
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {/* My Shift Selection */}
           <div className="space-y-2">
-            <Label>交換するシフト *</Label>
+            <Label>Shift to Swap *</Label>
             <Select value={selectedShiftId} onValueChange={setSelectedShiftId}>
               <SelectTrigger>
-                <SelectValue placeholder="シフトを選択" />
+                <SelectValue placeholder="Select shift" />
               </SelectTrigger>
               <SelectContent>
                 {myShifts.length === 0 ? (
                   <div className="p-2 text-sm text-muted-foreground">
-                    今後のシフトがありません
+                    No upcoming shifts
                   </div>
                 ) : (
                   myShifts.map((shift) => (
@@ -259,15 +260,15 @@ export function SwapRequestDialog({
 
           {/* Target User Selection */}
           <div className="space-y-2">
-            <Label>交換相手 *</Label>
+            <Label>Swap Partner *</Label>
             <Select value={selectedTargetId} onValueChange={handleTargetChange}>
               <SelectTrigger>
-                <SelectValue placeholder="スタッフを選択" />
+                <SelectValue placeholder="Select staff member" />
               </SelectTrigger>
               <SelectContent>
                 {teamMembers.length === 0 ? (
                   <div className="p-2 text-sm text-muted-foreground">
-                    チームメンバーがいません
+                    No team members
                   </div>
                 ) : (
                   teamMembers.map((member) => (
@@ -292,30 +293,30 @@ export function SwapRequestDialog({
           {selectedTargetId && (
             <div className="space-y-2">
               <Label>
-                相手のシフト（任意）
+                Partner's Shift (Optional)
                 <span className="ml-2 text-xs text-muted-foreground">
-                  指定しない場合、相手が自分のシフトを選択します
+                  If not specified, the partner will select their shift
                 </span>
               </Label>
               <Select
-                value={selectedTargetShiftId}
-                onValueChange={setSelectedTargetShiftId}
+                value={selectedTargetShiftId || "none"}
+                onValueChange={(value) => setSelectedTargetShiftId(value === "none" ? "" : value)}
                 disabled={loadingTargetShifts}
               >
                 <SelectTrigger>
                   <SelectValue
                     placeholder={
-                      loadingTargetShifts ? "読み込み中..." : "シフトを選択（任意）"
+                      loadingTargetShifts ? "Loading..." : "Select shift (optional)"
                     }
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">指定しない</SelectItem>
+                  <SelectItem value="none">Not specified</SelectItem>
                   {targetShifts.length === 0 && !loadingTargetShifts ? (
                     <div className="p-2 text-sm text-muted-foreground">
                       {selectedTarget
-                        ? `${getDisplayName(selectedTarget)}さんの今後のシフトがありません`
-                        : "シフトがありません"}
+                        ? `${getDisplayName(selectedTarget)} has no upcoming shifts`
+                        : "No shifts available"}
                     </div>
                   ) : (
                     targetShifts.map((shift) => (
@@ -341,7 +342,7 @@ export function SwapRequestDialog({
           {selectedTargetShift && (
             <div className="rounded-lg bg-blue-50 dark:bg-blue-950 p-3 text-sm space-y-1">
               <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
-                {selectedTarget && getDisplayName(selectedTarget)}さんのシフト
+                {selectedTarget && getDisplayName(selectedTarget)}'s Shift
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-muted-foreground" />
@@ -358,11 +359,11 @@ export function SwapRequestDialog({
 
           {/* Reason */}
           <div className="space-y-2">
-            <Label>理由（任意）</Label>
+            <Label>Reason (Optional)</Label>
             <Textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="交換の理由を入力してください..."
+              placeholder="Enter reason for swap..."
               rows={3}
             />
           </div>
@@ -374,13 +375,13 @@ export function SwapRequestDialog({
               onClick={() => handleOpenChange(false)}
               disabled={isSubmitting}
             >
-              キャンセル
+              Cancel
             </Button>
             <Button
               onClick={handleSubmit}
               disabled={isSubmitting || !selectedShiftId || !selectedTargetId}
             >
-              {isSubmitting ? "送信中..." : "リクエストを送信"}
+              {isSubmitting ? "Sending..." : "Send Request"}
             </Button>
           </div>
         </div>

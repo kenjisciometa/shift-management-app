@@ -28,8 +28,7 @@ export async function GET(
       .from("timesheets")
       .select(`
         *,
-        profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
-        profiles!timesheets_reviewed_by_fkey (id, first_name, last_name, display_name)
+        profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
       `)
       .eq("id", id)
       .eq("organization_id", profile.organization_id)
@@ -186,6 +185,18 @@ function generateCSV(timesheet: any, timeEntries: any[]): string {
 
   dailyBreakdown.sort((a, b) => a.date.getTime() - b.date.getTime());
 
+  // Calculate totals from daily breakdown (not stored values)
+  const totalWorkMinutes = dailyBreakdown.reduce((sum, day) => sum + day.totalWorkMinutes, 0);
+  const totalBreakMinutes = dailyBreakdown.reduce((sum, day) => sum + day.totalBreakMinutes, 0);
+  const regularHoursLimit = 40 * 60; // 40 hours in minutes
+  const overtimeMinutes = Math.max(0, totalWorkMinutes - regularHoursLimit);
+
+  const calculatedTotals = {
+    totalHours: totalWorkMinutes / 60,
+    breakHours: totalBreakMinutes / 60,
+    overtimeHours: overtimeMinutes / 60,
+  };
+
   const headers = [
     "Date",
     "Day",
@@ -213,9 +224,9 @@ function generateCSV(timesheet: any, timeEntries: any[]): string {
   rows.push(["Summary"]);
   rows.push(["Employee", timesheet.profiles?.display_name || `${timesheet.profiles?.first_name} ${timesheet.profiles?.last_name}`]);
   rows.push(["Period", `${format(parseISO(timesheet.period_start), "MMM d")} - ${format(parseISO(timesheet.period_end), "MMM d, yyyy")}`]);
-  rows.push(["Total Hours", formatHours(Number(timesheet.total_hours || 0))]);
-  rows.push(["Break Hours", formatHours(Number(timesheet.break_hours || 0))]);
-  rows.push(["Overtime Hours", formatHours(Number(timesheet.overtime_hours || 0))]);
+  rows.push(["Total Hours", formatHours(calculatedTotals.totalHours)]);
+  rows.push(["Break Hours", formatHours(calculatedTotals.breakHours)]);
+  rows.push(["Overtime Hours", formatHours(calculatedTotals.overtimeHours)]);
   rows.push(["Status", timesheet.status || "N/A"]);
 
   const csvContent = [
@@ -323,6 +334,18 @@ function generatePDFHTML(timesheet: any, timeEntries: any[]): string {
 
   dailyBreakdown.sort((a, b) => a.date.getTime() - b.date.getTime());
 
+  // Calculate totals from daily breakdown (not stored values)
+  const totalWorkMinutes = dailyBreakdown.reduce((sum, day) => sum + day.totalWorkMinutes, 0);
+  const totalBreakMinutes = dailyBreakdown.reduce((sum, day) => sum + day.totalBreakMinutes, 0);
+  const regularHoursLimit = 40 * 60; // 40 hours in minutes
+  const overtimeMinutes = Math.max(0, totalWorkMinutes - regularHoursLimit);
+
+  const calculatedTotals = {
+    totalHours: totalWorkMinutes / 60,
+    breakHours: totalBreakMinutes / 60,
+    overtimeHours: overtimeMinutes / 60,
+  };
+
   const rowsHTML = dailyBreakdown.length > 0
     ? dailyBreakdown.map((day) => `
       <tr>
@@ -400,7 +423,7 @@ function generatePDFHTML(timesheet: any, timeEntries: any[]): string {
     <p><strong>Period:</strong> ${period}</p>
     <p><strong>Status:</strong> ${timesheet.status || "N/A"}</p>
   </div>
-  
+
   <table>
     <thead>
       <tr>
@@ -417,20 +440,20 @@ function generatePDFHTML(timesheet: any, timeEntries: any[]): string {
       ${rowsHTML}
     </tbody>
   </table>
-  
+
   <div class="summary">
     <h2>Summary</h2>
     <div class="summary-row">
       <span>Total Hours:</span>
-      <span>${formatHours(Number(timesheet.total_hours || 0))}</span>
+      <span>${formatHours(calculatedTotals.totalHours)}</span>
     </div>
     <div class="summary-row">
       <span>Break Hours:</span>
-      <span>${formatHours(Number(timesheet.break_hours || 0))}</span>
+      <span>${formatHours(calculatedTotals.breakHours)}</span>
     </div>
     <div class="summary-row">
       <span>Overtime Hours:</span>
-      <span>${formatHours(Number(timesheet.overtime_hours || 0))}</span>
+      <span>${formatHours(calculatedTotals.overtimeHours)}</span>
     </div>
     ${timesheet.review_comment ? `
     <div class="summary-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd;">
@@ -441,7 +464,7 @@ function generatePDFHTML(timesheet: any, timeEntries: any[]): string {
     </div>
     ` : ""}
   </div>
-  
+
   <script>
     window.onload = function() {
       setTimeout(function() {

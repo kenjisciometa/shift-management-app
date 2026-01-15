@@ -50,7 +50,7 @@ export default async function SchedulePage({
   const supabase = await getCachedSupabase();
 
   // Parallel fetch all data
-  const [shiftsResult, teamMembersResult, locationsResult, departmentsResult, positionsResult, ptoRequestsResult] = await Promise.all([
+  const [shiftsResult, teamMembersResult, locationsResult, departmentsResult, positionsResult, ptoRequestsResult, organizationResult] = await Promise.all([
     // Get shifts for the date range
     (async () => {
       const query = supabase
@@ -119,6 +119,12 @@ export default async function SchedulePage({
       .gte("end_date", startDate.toISOString().split("T")[0])
       .lte("start_date", endDate.toISOString().split("T")[0])
       .order("start_date", { ascending: true }),
+    // Get organization settings
+    supabase
+      .from("organizations")
+      .select("settings")
+      .eq("id", profile.organization_id)
+      .single(),
   ]);
 
   return (
@@ -137,6 +143,7 @@ export default async function SchedulePage({
           isAdmin={isAdmin}
           currentUserId={user.id}
           organizationId={profile.organization_id}
+          scheduleSettings={organizationResult.data?.settings}
         />
       </div>
     </>

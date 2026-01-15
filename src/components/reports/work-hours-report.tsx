@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { format, parseISO, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths, differenceInMinutes } from "date-fns";
 import { Button } from "@/components/ui/button";
 import {
@@ -394,9 +394,8 @@ export function WorkHoursReport({
               </TableHeader>
               <TableBody>
                 {workData.map((user) => (
-                  <>
+                  <Fragment key={user.userId}>
                     <TableRow
-                      key={user.userId}
                       className="cursor-pointer hover:bg-muted/50"
                       onClick={() =>
                         setExpandedUser(
@@ -480,7 +479,7 @@ export function WorkHoursReport({
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>

@@ -133,7 +133,7 @@ export default async function ShiftSwapsPage() {
     .select("id, first_name, last_name, display_name, avatar_url")
     .eq("organization_id", profile.organization_id)
     .neq("id", user.id)
-    .eq("is_active", true);
+    .eq("status", "active");
 
   return (
     <>

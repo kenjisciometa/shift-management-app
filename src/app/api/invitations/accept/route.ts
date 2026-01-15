@@ -78,6 +78,8 @@ export async function POST(request: NextRequest) {
         first_name: invitation.first_name || "",
         last_name: invitation.last_name || "",
         email: invitation.email,
+        phone: invitation.phone || null,
+        employee_code: invitation.employee_code || null,
         role: invitation.role || "employee",
         status: "active",
       });
@@ -96,6 +98,8 @@ export async function POST(request: NextRequest) {
         .update({
           organization_id: invitation.organization_id,
           department_id: invitation.department_id,
+          phone: invitation.phone || null,
+          employee_code: invitation.employee_code || null,
           role: invitation.role || "employee",
           status: "active",
         })

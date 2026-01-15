@@ -61,6 +61,8 @@ export function InviteDialog({
     email: "",
     firstName: "",
     lastName: "",
+    phone: "",
+    employeeCode: "",
     role: "employee",
     departmentId: "",
   });
@@ -70,6 +72,8 @@ export function InviteDialog({
       email: "",
       firstName: "",
       lastName: "",
+      phone: "",
+      employeeCode: "",
       role: "employee",
       departmentId: "",
     });
@@ -106,6 +110,8 @@ export function InviteDialog({
         email: formData.email.toLowerCase().trim(),
         first_name: formData.firstName.trim(),
         last_name: formData.lastName.trim(),
+        phone: formData.phone.trim() || null,
+        employee_code: formData.employeeCode.trim() || null,
         role: formData.role,
         department_id: formData.departmentId || null,
         token,
@@ -261,6 +267,33 @@ export function InviteDialog({
                   required
                 />
               </div>
+            </div>
+
+            {/* Phone Number */}
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number (optional)</Label>
+              <Input
+                id="phone"
+                type="tel"
+                placeholder="+1 234 567 8900"
+                value={formData.phone}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, phone: e.target.value }))
+                }
+              />
+            </div>
+
+            {/* Personal ID */}
+            <div className="space-y-2">
+              <Label htmlFor="employeeCode">Personal ID (optional)</Label>
+              <Input
+                id="employeeCode"
+                placeholder="EMP001"
+                value={formData.employeeCode}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, employeeCode: e.target.value }))
+                }
+              />
             </div>
 
             {/* Role */}

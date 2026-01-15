@@ -455,12 +455,14 @@ export type Database = {
           created_at: string | null
           department_id: string | null
           email: string
+          employee_code: string | null
           expires_at: string
           first_name: string | null
           id: string
           invited_by: string | null
           last_name: string | null
           organization_id: string
+          phone: string | null
           role: string | null
           status: string | null
           token: string
@@ -471,12 +473,14 @@ export type Database = {
           created_at?: string | null
           department_id?: string | null
           email: string
+          employee_code?: string | null
           expires_at: string
           first_name?: string | null
           id?: string
           invited_by?: string | null
           last_name?: string | null
           organization_id: string
+          phone?: string | null
           role?: string | null
           status?: string | null
           token: string
@@ -487,12 +491,14 @@ export type Database = {
           created_at?: string | null
           department_id?: string | null
           email?: string
+          employee_code?: string | null
           expires_at?: string
           first_name?: string | null
           id?: string
           invited_by?: string | null
           last_name?: string | null
           organization_id?: string
+          phone?: string | null
           role?: string | null
           status?: string | null
           token?: string
@@ -784,8 +790,55 @@ export type Database = {
         }
         Relationships: []
       }
+      positions: {
+        Row: {
+          color: string
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          organization_id: string
+          sort_order: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          color?: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          organization_id: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          color?: string
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          organization_id?: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "positions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
+          allow_time_edit: boolean | null
+          auto_clock_out_enabled: boolean | null
+          auto_clock_out_time: string | null
           avatar_url: string | null
           created_at: string | null
           department_id: string | null
@@ -806,6 +859,9 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          allow_time_edit?: boolean | null
+          auto_clock_out_enabled?: boolean | null
+          auto_clock_out_time?: string | null
           avatar_url?: string | null
           created_at?: string | null
           department_id?: string | null
@@ -826,6 +882,9 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          allow_time_edit?: boolean | null
+          auto_clock_out_enabled?: boolean | null
+          auto_clock_out_time?: string | null
           avatar_url?: string | null
           created_at?: string | null
           department_id?: string | null
@@ -858,128 +917,6 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      positions: {
-        Row: {
-          id: string
-          organization_id: string
-          name: string
-          color: string
-          description: string | null
-          is_active: boolean | null
-          sort_order: number | null
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: string
-          organization_id: string
-          name: string
-          color?: string
-          description?: string | null
-          is_active?: boolean | null
-          sort_order?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: string
-          organization_id?: string
-          name?: string
-          color?: string
-          description?: string | null
-          is_active?: boolean | null
-          sort_order?: number | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "positions_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      user_positions: {
-        Row: {
-          id: string
-          user_id: string
-          position_id: string
-          is_primary: boolean | null
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          position_id: string
-          is_primary?: boolean | null
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          position_id?: string
-          is_primary?: boolean | null
-          created_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "user_positions_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "user_positions_position_id_fkey"
-            columns: ["position_id"]
-            isOneToOne: false
-            referencedRelation: "positions"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      user_locations: {
-        Row: {
-          id: string
-          user_id: string
-          location_id: string
-          is_primary: boolean | null
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          location_id: string
-          is_primary?: boolean | null
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          location_id?: string
-          is_primary?: boolean | null
-          created_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "user_locations_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "user_locations_location_id_fkey"
-            columns: ["location_id"]
-            isOneToOne: false
-            referencedRelation: "locations"
             referencedColumns: ["id"]
           },
         ]
@@ -1350,7 +1287,6 @@ export type Database = {
           location_id: string | null
           notes: string | null
           organization_id: string
-          position: string | null
           position_id: string | null
           published_at: string | null
           repeat_parent_id: string | null
@@ -1372,7 +1308,6 @@ export type Database = {
           location_id?: string | null
           notes?: string | null
           organization_id: string
-          position?: string | null
           position_id?: string | null
           published_at?: string | null
           repeat_parent_id?: string | null
@@ -1394,7 +1329,6 @@ export type Database = {
           location_id?: string | null
           notes?: string | null
           organization_id?: string
-          position?: string | null
           position_id?: string | null
           published_at?: string | null
           repeat_parent_id?: string | null
@@ -1757,6 +1691,84 @@ export type Database = {
           },
         ]
       }
+      user_locations: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_primary: boolean | null
+          location_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_primary?: boolean | null
+          location_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_primary?: boolean | null
+          location_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_locations_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_locations_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_positions: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_primary: boolean | null
+          position_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_primary?: boolean | null
+          position_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_primary?: boolean | null
+          position_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_positions_position_id_fkey"
+            columns: ["position_id"]
+            isOneToOne: false
+            referencedRelation: "positions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_positions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1766,6 +1778,8 @@ export type Database = {
         Args: { lat1: number; lat2: number; lon1: number; lon2: number }
         Returns: number
       }
+      count_clocked_in_employees: { Args: { org_id: string }; Returns: number }
+      count_unread_messages: { Args: { user_id: string }; Returns: number }
       create_organization_with_owner: {
         Args: {
           p_email: string
@@ -1779,6 +1793,7 @@ export type Database = {
         Returns: string
       }
       get_user_organization_id: { Args: Record<PropertyKey, never>; Returns: string }
+      get_user_room_ids: { Args: { user_uuid: string }; Returns: string[] }
       is_inside_geofence: {
         Args: {
           fence_lat: number
@@ -1826,9 +1841,7 @@ export type Tables<
     ? keyof (Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         Database[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof Database
-}
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
   ? (Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
       Database[DefaultSchemaTableNameOrOptions["schema"]]["Views"])[TableName] extends {
       Row: infer R
@@ -1854,9 +1867,7 @@ export type TablesInsert<
   }
     ? keyof Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof Database
-}
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
   ? Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Insert: infer I
     }
@@ -1879,9 +1890,7 @@ export type TablesUpdate<
   }
     ? keyof Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
     : never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-  schema: keyof Database
-}
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof Database }
   ? Database[DefaultSchemaTableNameOrOptions["schema"]]["Tables"][TableName] extends {
       Update: infer U
     }
@@ -1904,9 +1913,7 @@ export type Enums<
   }
     ? keyof Database[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
     : never = never,
-> = DefaultSchemaEnumNameOrOptions extends {
-  schema: keyof Database
-}
+> = DefaultSchemaEnumNameOrOptions extends { schema: keyof Database }
   ? Database[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
     ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
@@ -1921,9 +1928,7 @@ export type CompositeTypes<
   }
     ? keyof Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
     : never = never,
-> = PublicCompositeTypeNameOrOptions extends {
-  schema: keyof Database
-}
+> = PublicCompositeTypeNameOrOptions extends { schema: keyof Database }
   ? Database[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
     ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]

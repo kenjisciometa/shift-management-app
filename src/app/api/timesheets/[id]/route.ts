@@ -27,8 +27,7 @@ export async function GET(
       .from("timesheets")
       .select(`
         *,
-        profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
-        profiles!timesheets_reviewed_by_fkey (id, first_name, last_name, display_name)
+        profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
       `)
       .eq("id", id)
       .eq("organization_id", profile.organization_id)
@@ -117,8 +116,7 @@ export async function PUT(
       .eq("id", id)
       .select(`
         *,
-        profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url),
-        profiles!timesheets_reviewed_by_fkey (id, first_name, last_name, display_name)
+        profiles!timesheets_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
       `)
       .single();
 
