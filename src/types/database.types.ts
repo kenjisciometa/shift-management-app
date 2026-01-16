@@ -288,7 +288,7 @@ export type Database = {
           created_at: string | null
           id: string
           progress: Json
-          shift_id: string
+          shift_id: string | null
           updated_at: string | null
           user_id: string
         }
@@ -298,7 +298,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           progress?: Json
-          shift_id: string
+          shift_id?: string | null
           updated_at?: string | null
           user_id: string
         }
@@ -308,7 +308,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           progress?: Json
-          shift_id?: string
+          shift_id?: string | null
           updated_at?: string | null
           user_id?: string
         }
@@ -1127,6 +1127,7 @@ export type Database = {
       }
       shift_swaps: {
         Row: {
+          applied_at: string | null
           created_at: string | null
           id: string
           organization_id: string
@@ -1142,6 +1143,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          applied_at?: string | null
           created_at?: string | null
           id?: string
           organization_id: string
@@ -1157,6 +1159,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          applied_at?: string | null
           created_at?: string | null
           id?: string
           organization_id?: string
@@ -1745,6 +1748,7 @@ export type Database = {
           is_primary: boolean | null
           position_id: string
           user_id: string
+          wage_rate: number | null
         }
         Insert: {
           created_at?: string | null
@@ -1752,6 +1756,7 @@ export type Database = {
           is_primary?: boolean | null
           position_id: string
           user_id: string
+          wage_rate?: number | null
         }
         Update: {
           created_at?: string | null
@@ -1759,6 +1764,7 @@ export type Database = {
           is_primary?: boolean | null
           position_id?: string
           user_id?: string
+          wage_rate?: number | null
         }
         Relationships: [
           {

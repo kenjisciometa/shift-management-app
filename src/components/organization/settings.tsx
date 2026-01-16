@@ -16,6 +16,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -48,7 +56,6 @@ import {
 import { LocationDialog } from "./location-dialog";
 import { DepartmentDialog } from "./department-dialog";
 import { LocationMap } from "./location-map";
-import { PTOPolicyManager } from "@/components/pto/policy-manager";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Organization = Database["public"]["Tables"]["organizations"]["Row"];
@@ -70,15 +77,12 @@ type TeamMember = {
   role: string | null;
 };
 
-type PTOPolicy = Database["public"]["Tables"]["pto_policies"]["Row"];
-
 interface OrganizationSettingsProps {
   profile: Profile;
   organization: Organization;
   locations: Location[];
   departments: Department[];
   teamMembers: TeamMember[];
-  ptoPolicies: PTOPolicy[];
 }
 
 const timezones = [
@@ -111,7 +115,6 @@ export function OrganizationSettings({
   locations,
   departments,
   teamMembers,
-  ptoPolicies,
 }: OrganizationSettingsProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -350,7 +353,6 @@ export function OrganizationSettings({
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="locations">Locations</TabsTrigger>
           <TabsTrigger value="departments">Departments</TabsTrigger>
-          <TabsTrigger value="pto-policies">PTO Policies</TabsTrigger>
         </TabsList>
 
         {/* General Settings */}
@@ -527,71 +529,92 @@ export function OrganizationSettings({
               }}
             />
           ) : locations.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2">
-              {locations.map((location) => (
-                <Card key={location.id} className="group">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <MapPin className="h-5 w-5 text-primary" />
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[150px]">Name</TableHead>
+                    <TableHead className="min-w-[200px]">Address</TableHead>
+                    <TableHead className="min-w-[100px]">Status</TableHead>
+                    <TableHead className="min-w-[100px]">Geofence</TableHead>
+                    <TableHead className="min-w-[100px]">Radius</TableHead>
+                    <TableHead className="min-w-[80px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {locations.map((location) => (
+                    <TableRow key={location.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="h-4 w-4 text-muted-foreground" />
+                          {location.name}
                         </div>
-                        <div>
-                          <h3 className="font-medium">{location.name}</h3>
-                          {location.address && (
-                            <p className="text-sm text-muted-foreground">
-                              {location.address}
-                            </p>
-                          )}
-                          <div className="flex items-center gap-2 mt-2">
-                            <Badge variant={location.is_active ? "default" : "secondary"}>
-                              {location.is_active ? "Active" : "Inactive"}
-                            </Badge>
-                            {location.geofence_enabled && (
-                              <Badge variant="outline">
-                                <Globe className="h-3 w-3 mr-1" />
-                                {location.radius_meters}m radius
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100"
-                            disabled={processingId === location.id}
-                          >
-                            {processingId === location.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <MoreHorizontal className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => {
-                              setSelectedLocation(location);
-                              setLocationDialogOpen(true);
-                            }}
-                          >
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onClick={() => handleDeleteLocation(location.id)}
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-muted-foreground">
+                          {location.address || "-"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={location.is_active ? "outline" : "secondary"} className={location.is_active ? "bg-green-50 text-green-700 border-green-200" : ""}>
+                          {location.is_active ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {location.geofence_enabled ? (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                            <Globe className="h-3 w-3 mr-1" />
+                            Enabled
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">Disabled</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {location.geofence_enabled ? (
+                          <span>{location.radius_meters}m</span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              disabled={processingId === location.id}
+                            >
+                              {processingId === location.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <MoreHorizontal className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedLocation(location);
+                                setLocationDialogOpen(true);
+                              }}
+                            >
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={() => handleDeleteLocation(location.id)}
+                            >
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           ) : (
             <Card>
@@ -718,13 +741,6 @@ export function OrganizationSettings({
           )}
         </TabsContent>
 
-        {/* PTO Policies */}
-        <TabsContent value="pto-policies" className="mt-6">
-          <PTOPolicyManager
-            policies={ptoPolicies}
-            organizationId={organization.id}
-          />
-        </TabsContent>
       </Tabs>
 
       {/* Location Dialog */}

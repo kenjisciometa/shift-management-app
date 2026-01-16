@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { DashboardHeader } from "@/components/dashboard/header";
-import { ShiftSwapsDashboard } from "@/components/shift-swaps/dashboard";
+import { ShiftSwapsContainer } from "@/components/shift-swaps/shift-swaps-container";
+import { defaultTeamSettings, type TeamSettings } from "@/components/settings/team-settings";
 
 export default async function ShiftSwapsPage() {
   const supabase = await createClient();
@@ -14,7 +15,7 @@ export default async function ShiftSwapsPage() {
     redirect("/login");
   }
 
-  // Get user profile
+  // Get user profile with organization
   const { data: profile } = await supabase
     .from("profiles")
     .select("*, organizations(*)")
@@ -30,32 +31,25 @@ export default async function ShiftSwapsPage() {
     profile.role === "owner" ||
     profile.role === "manager";
 
-  // Get user's shift swap requests
-  const { data: mySwapRequests } = await supabase
-    .from("shift_swaps")
-    .select(
-      `
-      *,
-      requester_shift:shifts!shift_swaps_requester_shift_id_fkey (
-        id, start_time, end_time,
-        locations (id, name),
-        positions (id, name, color)
-      ),
-      target_shift:shifts!shift_swaps_target_shift_id_fkey (
-        id, start_time, end_time,
-        locations (id, name),
-        positions (id, name, color)
-      ),
-      target:profiles!shift_swaps_target_id_fkey (
-        id, first_name, last_name, display_name, avatar_url
-      )
-    `
-    )
-    .eq("requester_id", user.id)
-    .order("created_at", { ascending: false });
+  // Get organization settings
+  const { data: organization } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", profile.organization_id)
+    .single();
 
-  // Get swap requests targeting the user
-  const { data: incomingRequests } = await supabase
+  // Parse settings with defaults
+  const settings: TeamSettings = {
+    ...defaultTeamSettings,
+    ...(organization?.settings as Partial<TeamSettings> || {}),
+    shiftSwapSettings: {
+      ...defaultTeamSettings.shiftSwapSettings,
+      ...((organization?.settings as any)?.shiftSwapSettings || {}),
+    },
+  };
+
+  // Build the query based on admin status
+  let swapsQuery = supabase
     .from("shift_swaps")
     .select(
       `
@@ -72,44 +66,21 @@ export default async function ShiftSwapsPage() {
       ),
       requester:profiles!shift_swaps_requester_id_fkey (
         id, first_name, last_name, display_name, avatar_url
+      ),
+      target:profiles!shift_swaps_target_id_fkey (
+        id, first_name, last_name, display_name, avatar_url
       )
     `
     )
-    .eq("target_id", user.id)
-    .eq("status", "pending")
+    .eq("organization_id", profile.organization_id)
     .order("created_at", { ascending: false });
 
-  // Get pending swap requests for admin approval
-  let pendingForAdmin = null;
-  if (isAdmin) {
-    const { data } = await supabase
-      .from("shift_swaps")
-      .select(
-        `
-        *,
-        requester_shift:shifts!shift_swaps_requester_shift_id_fkey (
-          id, start_time, end_time,
-          locations (id, name),
-          positions (id, name, color)
-        ),
-        target_shift:shifts!shift_swaps_target_shift_id_fkey (
-          id, start_time, end_time,
-          locations (id, name),
-          positions (id, name, color)
-        ),
-        requester:profiles!shift_swaps_requester_id_fkey (
-          id, first_name, last_name, display_name, avatar_url
-        ),
-        target:profiles!shift_swaps_target_id_fkey (
-          id, first_name, last_name, display_name, avatar_url
-        )
-      `
-      )
-      .eq("organization_id", profile.organization_id)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false });
-    pendingForAdmin = data;
+  // If not admin, only fetch user's own swaps (as requester or target)
+  if (!isAdmin) {
+    swapsQuery = swapsQuery.or(`requester_id.eq.${user.id},target_id.eq.${user.id}`);
   }
+
+  const { data: allSwaps } = await swapsQuery;
 
   // Get user's upcoming shifts for creating swap requests
   const now = new Date().toISOString();
@@ -135,18 +106,34 @@ export default async function ShiftSwapsPage() {
     .neq("id", user.id)
     .eq("status", "active");
 
+  // Get all employees for filter dropdown (admin only)
+  const { data: allEmployees } = isAdmin
+    ? await supabase
+        .from("profiles")
+        .select("id, first_name, last_name, display_name")
+        .eq("organization_id", profile.organization_id)
+        .eq("status", "active")
+        .order("first_name")
+    : { data: null };
+
+  // Transform employees for dropdown
+  const employees = (allEmployees || []).map((emp) => ({
+    id: emp.id,
+    name: emp.display_name || `${emp.first_name || ""} ${emp.last_name || ""}`.trim() || "Unknown",
+  }));
+
   return (
     <>
       <DashboardHeader title="Shift Swaps" />
       <div className="container mx-auto p-6">
-        <ShiftSwapsDashboard
+        <ShiftSwapsContainer
           profile={profile}
-          mySwapRequests={mySwapRequests || []}
-          incomingRequests={incomingRequests || []}
-          pendingForAdmin={pendingForAdmin || []}
+          initialSwaps={allSwaps || []}
           myShifts={myShifts || []}
           teamMembers={teamMembers || []}
+          employees={employees}
           isAdmin={isAdmin}
+          settings={settings}
         />
       </div>
     </>

@@ -77,7 +77,8 @@ type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
 type TeamMember = Database["public"]["Tables"]["profiles"]["Row"] & {
   departments: { id: string; name: string } | null;
-  user_positions?: { position_id: string; positions: Position | null }[];
+  user_positions?: { position_id: string; wage_rate: number | null; positions: Position | null }[];
+  user_locations?: { location_id: string; is_primary: boolean | null; locations: Location | null }[];
 };
 
 type Invitation = Database["public"]["Tables"]["employee_invitations"]["Row"] & {
@@ -1030,6 +1031,7 @@ export function TeamDashboard({
         currentUser={profile}
         departments={departments}
         positions={positions}
+        locations={locations}
       />
 
       {/* Position Dialog */}

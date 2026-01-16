@@ -16,7 +16,7 @@ export default async function FormsPage() {
   const supabase = await getCachedSupabase();
 
   // Parallel fetch all data
-  const [templatesResult, submissionsResult] = await Promise.all([
+  const [templatesResult, mySubmissionsResult, allSubmissionsResult] = await Promise.all([
     // Get form templates
     supabase
       .from("form_templates")
@@ -34,6 +34,19 @@ export default async function FormsPage() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20),
+    // Get all submissions for admins
+    isAdmin
+      ? supabase
+          .from("form_submissions")
+          .select(`
+            *,
+            form_templates (id, name),
+            profiles (id, first_name, last_name, display_name, avatar_url)
+          `)
+          .eq("organization_id", profile.organization_id)
+          .order("created_at", { ascending: false })
+          .limit(100)
+      : Promise.resolve({ data: [] }),
   ]);
 
   return (
@@ -43,7 +56,8 @@ export default async function FormsPage() {
         <FormsDashboard
           profile={profile}
           templates={templatesResult.data || []}
-          submissions={submissionsResult.data || []}
+          mySubmissions={mySubmissionsResult.data || []}
+          allSubmissions={allSubmissionsResult.data || []}
           isAdmin={isAdmin}
         />
       </div>

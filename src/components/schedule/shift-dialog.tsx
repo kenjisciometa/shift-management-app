@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { format, parseISO, setHours, setMinutes, addDays, addWeeks, startOfDay, isBefore, isAfter, isSameDay } from "date-fns";
+import { format, parseISO, setHours, setMinutes, addDays, addWeeks, addHours, startOfDay, isBefore, isAfter, isSameDay } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
@@ -67,6 +67,16 @@ type Department = { id: string; name: string };
 type Position = Database["public"]["Tables"]["positions"]["Row"];
 type ShiftTemplate = Database["public"]["Tables"]["shift_templates"]["Row"];
 
+interface SchedulingPreferences {
+  defaultShiftDuration: number; // in hours
+  breakDuration: number; // in minutes
+}
+
+const defaultSchedulingPreferences: SchedulingPreferences = {
+  defaultShiftDuration: 8,
+  breakDuration: 30,
+};
+
 interface ShiftDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -79,6 +89,7 @@ interface ShiftDialogProps {
   positions: Position[];
   organizationId: string;
   isAdmin: boolean;
+  schedulingPreferences?: SchedulingPreferences;
 }
 
 const repeatOptions = [
@@ -116,9 +127,25 @@ export function ShiftDialog({
   positions,
   organizationId,
   isAdmin,
+  schedulingPreferences,
 }: ShiftDialogProps) {
   const router = useRouter();
   const supabase = createClient();
+
+  // Merge with defaults
+  const schedPrefs = {
+    ...defaultSchedulingPreferences,
+    ...schedulingPreferences,
+  };
+
+  // Calculate end time based on start time and default duration
+  const calculateEndTime = (startTime: string, durationHours: number): string => {
+    const [hours, minutes] = startTime.split(":").map(Number);
+    const startDate = setMinutes(setHours(new Date(), hours), minutes);
+    const endDate = addHours(startDate, durationHours);
+    return format(endDate, "HH:mm");
+  };
+
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showPublishDialog, setShowPublishDialog] = useState(false);
@@ -280,12 +307,14 @@ export function ShiftDialog({
         setRepeatEndDate(format(addWeeks(date, 4), "yyyy-MM-dd"));
       } else {
         const date = selectedDate || new Date();
+        const defaultStartTime = "09:00";
+        const defaultEndTime = calculateEndTime(defaultStartTime, schedPrefs.defaultShiftDuration);
         setFormData({
           userId: "",
           date: format(date, "yyyy-MM-dd"),
-          startTime: "09:00",
-          endTime: "17:00",
-          breakMinutes: 60,
+          startTime: defaultStartTime,
+          endTime: defaultEndTime,
+          breakMinutes: schedPrefs.breakDuration,
           locationId: locations[0]?.id || "",
           departmentId: "",
           positionId: "",
@@ -296,7 +325,7 @@ export function ShiftDialog({
         setRepeatEndDate(format(addWeeks(date, 4), "yyyy-MM-dd"));
       }
     }
-  }, [open, shift, selectedDate, template, locations]);
+  }, [open, shift, selectedDate, template, locations, schedPrefs.defaultShiftDuration, schedPrefs.breakDuration]);
 
   // Auto-select the current day when repeat type changes to non-none
   useEffect(() => {
@@ -761,9 +790,20 @@ export function ShiftDialog({
                   id="startTime"
                   type="time"
                   value={formData.startTime}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, startTime: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const newStartTime = e.target.value;
+                    // Auto-update end time based on default duration (only for new shifts)
+                    if (!isEditing && newStartTime) {
+                      const newEndTime = calculateEndTime(newStartTime, schedPrefs.defaultShiftDuration);
+                      setFormData((prev) => ({
+                        ...prev,
+                        startTime: newStartTime,
+                        endTime: newEndTime,
+                      }));
+                    } else {
+                      setFormData((prev) => ({ ...prev, startTime: newStartTime }));
+                    }
+                  }}
                   className="w-28"
                   required
                 />
@@ -783,19 +823,26 @@ export function ShiftDialog({
               </div>
               <div className="flex items-center gap-1">
                 <span className="text-sm text-muted-foreground w-10">Break</span>
-                <Input
-                  id="breakMinutes"
-                  type="number"
-                  min="0"
-                  value={formData.breakMinutes}
-                  onChange={(e) =>
+                <Select
+                  value={formData.breakMinutes.toString()}
+                  onValueChange={(value) =>
                     setFormData((prev) => ({
                       ...prev,
-                      breakMinutes: parseInt(e.target.value) || 0,
+                      breakMinutes: parseInt(value),
                     }))
                   }
-                  className="w-16"
-                />
+                >
+                  <SelectTrigger className="w-24">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 25 }, (_, i) => i * 5).map((minutes) => (
+                      <SelectItem key={minutes} value={minutes.toString()}>
+                        {minutes === 0 ? "No break" : `${minutes} min`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>

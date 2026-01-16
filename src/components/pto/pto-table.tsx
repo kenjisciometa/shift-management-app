@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { format, parseISO } from "date-fns";
 import {
   Table,
   TableBody,
@@ -12,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +21,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Pencil,
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
@@ -31,46 +32,38 @@ import {
   ChevronDown,
 } from "lucide-react";
 import type {
-  TimesheetTableRow,
-  TimesheetSort,
-  SortField,
-  TimesheetPagination,
-  TimesheetStatus,
-} from "@/types/timesheet-table";
-import type { TimesheetAccess } from "@/hooks/use-timesheet-access";
+  PTOTableRow,
+  PTOSort,
+  PTOSortField,
+  PTOPagination,
+  PTOStatus,
+  ptoTypeLabels,
+} from "@/types/pto-table";
 import { cn } from "@/lib/utils";
 
-interface TimesheetTableProps {
-  data: TimesheetTableRow[];
-  access: TimesheetAccess;
+interface PTOTableProps {
+  data: PTOTableRow[];
+  isAdmin: boolean;
   currentUserId: string;
-  sort: TimesheetSort;
-  onSortChange: (sort: TimesheetSort) => void;
-  pagination: TimesheetPagination;
+  sort: PTOSort;
+  onSortChange: (sort: PTOSort) => void;
+  pagination: PTOPagination;
   onPageChange: (page: number) => void;
-  onEditEntry: (entry: TimesheetTableRow) => void;
-  onBulkStatusChange?: (entryIds: string[], status: TimesheetStatus) => Promise<void>;
+  onApprove?: (requestId: string) => void;
+  onReject?: (requestId: string) => void;
+  onBulkStatusChange?: (requestIds: string[], status: PTOStatus) => Promise<void>;
   loading?: boolean;
+  processingId?: string | null;
 }
 
-/**
- * Format minutes to HH:mm display string
- */
-function formatDuration(minutes: number): string {
-  const hours = Math.floor(Math.abs(minutes) / 60);
-  const mins = Math.abs(minutes) % 60;
-  const sign = minutes < 0 ? "-" : "";
-  return `${sign}${hours}:${mins.toString().padStart(2, "0")}`;
-}
-
-/**
- * Format difference with +/- sign
- */
-function formatDifference(minutes: number): string {
-  if (minutes === 0) return "0:00";
-  const sign = minutes > 0 ? "+" : "";
-  return `${sign}${formatDuration(minutes)}`;
-}
+const ptoTypeLabelsMap: Record<string, string> = {
+  vacation: "Vacation",
+  sick: "Sick Leave",
+  personal: "Personal",
+  bereavement: "Bereavement",
+  jury_duty: "Jury Duty",
+  other: "Other",
+};
 
 /**
  * Get status badge variant
@@ -95,9 +88,27 @@ function getStatusBadge(status: string) {
           Rejected
         </Badge>
       );
+    case "cancelled":
+      return (
+        <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
+          Cancelled
+        </Badge>
+      );
     default:
       return <Badge variant="outline">{status}</Badge>;
   }
+}
+
+/**
+ * Get initials from name
+ */
+function getInitials(displayName: string, legalName: string): string {
+  const name = displayName || legalName;
+  const parts = name.split(" ");
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  }
+  return name.substring(0, 2).toUpperCase();
 }
 
 /**
@@ -110,10 +121,10 @@ function SortableHeader({
   onSortChange,
   className,
 }: {
-  field: SortField;
+  field: PTOSortField;
   label: string;
-  currentSort: TimesheetSort;
-  onSortChange: (sort: TimesheetSort) => void;
+  currentSort: PTOSort;
+  onSortChange: (sort: PTOSort) => void;
   className?: string;
 }) {
   const isActive = currentSort.field === field;
@@ -147,20 +158,22 @@ function SortableHeader({
   );
 }
 
-export function TimesheetTable({
+export function PTOTable({
   data,
-  access,
+  isAdmin,
   currentUserId,
   sort,
   onSortChange,
   pagination,
   onPageChange,
-  onEditEntry,
+  onApprove,
+  onReject,
   onBulkStatusChange,
   loading,
-}: TimesheetTableProps) {
-  const showNameColumn = access.canViewAllTimesheets;
-  const canBulkEdit = access.canEditAllTimesheets && onBulkStatusChange;
+  processingId,
+}: PTOTableProps) {
+  const showEmployeeColumns = isAdmin;
+  const canBulkEdit = isAdmin && onBulkStatusChange;
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -185,22 +198,13 @@ export function TimesheetTable({
   }, [data]);
 
   /**
-   * Check if user can edit this specific entry
-   */
-  const canEdit = (entry: TimesheetTableRow) => {
-    if (access.canEditAllTimesheets) return true;
-    if (access.isEmployee) {
-      return entry.userId === currentUserId && entry.status === "pending";
-    }
-    return false;
-  };
-
-  /**
    * Handle select all checkbox
    */
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(new Set(data.map((entry) => entry.id)));
+      // Only select pending requests for bulk actions
+      const pendingIds = data.filter(entry => entry.status === "pending").map(entry => entry.id);
+      setSelectedIds(new Set(pendingIds));
     } else {
       setSelectedIds(new Set());
     }
@@ -222,7 +226,7 @@ export function TimesheetTable({
   /**
    * Handle bulk status change
    */
-  const handleBulkStatusChange = async (status: TimesheetStatus) => {
+  const handleBulkStatusChange = async (status: PTOStatus) => {
     if (!onBulkStatusChange || selectedIds.size === 0) return;
 
     setBulkLoading(true);
@@ -234,10 +238,11 @@ export function TimesheetTable({
     }
   };
 
-  const isAllSelected = data.length > 0 && selectedIds.size === data.length;
-  const isIndeterminate = selectedIds.size > 0 && selectedIds.size < data.length;
+  const pendingData = data.filter(entry => entry.status === "pending");
+  const isAllSelected = pendingData.length > 0 && selectedIds.size === pendingData.length;
+  const isIndeterminate = selectedIds.size > 0 && selectedIds.size < pendingData.length;
   const headerCheckboxState = isAllSelected ? true : isIndeterminate ? "indeterminate" : false;
-  const colSpan = showNameColumn ? 18 : 15;
+  const colSpan = showEmployeeColumns ? 12 : 9;
 
   return (
     <div className="space-y-4">
@@ -263,10 +268,6 @@ export function TimesheetTable({
                 <XCircle className="h-4 w-4 mr-2 text-red-600" />
                 Reject
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleBulkStatusChange("pending")}>
-                <Clock className="h-4 w-4 mr-2 text-yellow-600" />
-                Set Pending
-              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
@@ -289,13 +290,14 @@ export function TimesheetTable({
                   <Checkbox
                     checked={headerCheckboxState}
                     onCheckedChange={(checked) => handleSelectAll(checked === true)}
-                    aria-label="Select all"
-                    disabled={data.length === 0}
+                    aria-label="Select all pending"
+                    disabled={pendingData.length === 0}
                   />
                 </TableHead>
               )}
-              {showNameColumn && (
+              {showEmployeeColumns && (
                 <>
+                  <TableHead className="w-[50px]"></TableHead>
                   <SortableHeader
                     field="display_name"
                     label="Display Name"
@@ -320,41 +322,34 @@ export function TimesheetTable({
                 </>
               )}
               <SortableHeader
-                field="date"
-                label="Date"
+                field="pto_type"
+                label="Type"
                 currentSort={sort}
                 onSortChange={onSortChange}
                 className="min-w-[100px]"
               />
-              <TableHead className="min-w-[120px]">Locations</TableHead>
               <SortableHeader
-                field="positions"
-                label="Positions"
+                field="start_date"
+                label="Start Date"
                 currentSort={sort}
                 onSortChange={onSortChange}
-                className="min-w-[120px]"
+                className="min-w-[110px]"
               />
               <SortableHeader
-                field="clock_in_time"
-                label="Clock In"
+                field="end_date"
+                label="End Date"
                 currentSort={sort}
                 onSortChange={onSortChange}
-                className="min-w-[80px]"
+                className="min-w-[110px]"
               />
-              <TableHead className="min-w-[80px]">Clock Out</TableHead>
-              <TableHead className="min-w-[90px]">Auto Clock-out</TableHead>
-              <TableHead className="min-w-[90px]">Break Dur.</TableHead>
-              <TableHead className="min-w-[80px]">Break Start</TableHead>
-              <TableHead className="min-w-[80px]">Break End</TableHead>
               <SortableHeader
-                field="shift_duration"
-                label="Shift Dur."
+                field="total_days"
+                label="Days"
                 currentSort={sort}
                 onSortChange={onSortChange}
-                className="min-w-[90px]"
+                className="min-w-[70px]"
               />
-              <TableHead className="min-w-[100px]">Schedule Dur.</TableHead>
-              <TableHead className="min-w-[80px]">Diff</TableHead>
+              <TableHead className="min-w-[200px]">Reason</TableHead>
               <SortableHeader
                 field="status"
                 label="Status"
@@ -362,7 +357,9 @@ export function TimesheetTable({
                 onSortChange={onSortChange}
                 className="min-w-[100px]"
               />
-              <TableHead className="min-w-[60px]">Edit</TableHead>
+              {isAdmin && (
+                <TableHead className="min-w-[100px]">Actions</TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -381,7 +378,7 @@ export function TimesheetTable({
                   colSpan={colSpan}
                   className="h-24 text-center text-muted-foreground"
                 >
-                  No timesheet entries found.
+                  No PTO requests found.
                 </TableCell>
               </TableRow>
             ) : (
@@ -397,68 +394,74 @@ export function TimesheetTable({
                         onCheckedChange={(checked) =>
                           handleSelectRow(entry.id, checked as boolean)
                         }
+                        disabled={entry.status !== "pending"}
                         aria-label={`Select ${entry.displayName}`}
                       />
                     </TableCell>
                   )}
-                  {showNameColumn && (
+                  {showEmployeeColumns && (
                     <>
+                      <TableCell>
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={entry.avatarUrl || undefined} />
+                          <AvatarFallback className="text-xs">
+                            {getInitials(entry.displayName, entry.legalName)}
+                          </AvatarFallback>
+                        </Avatar>
+                      </TableCell>
                       <TableCell className="font-medium">{entry.displayName}</TableCell>
                       <TableCell>{entry.legalName}</TableCell>
                       <TableCell>{entry.personalId || "-"}</TableCell>
                     </>
                   )}
                   <TableCell>
-                    {new Date(entry.date).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
+                    <Badge variant="secondary">
+                      {ptoTypeLabelsMap[entry.ptoType] || entry.ptoType}
+                    </Badge>
                   </TableCell>
-                  <TableCell>{entry.locations || "-"}</TableCell>
-                  <TableCell>{entry.positions || "-"}</TableCell>
-                  <TableCell>{entry.clockInTime || "-"}</TableCell>
-                  <TableCell>{entry.clockOutTime || "-"}</TableCell>
                   <TableCell>
-                    {entry.autoClockOut ? (
-                      <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
-                        Yes
-                      </Badge>
-                    ) : (
-                      <span className="text-muted-foreground">No</span>
-                    )}
+                    {format(parseISO(entry.startDate), "MMM d, yyyy")}
                   </TableCell>
-                  <TableCell>{formatDuration(entry.breakDuration)}</TableCell>
-                  <TableCell>{entry.breakStart || "-"}</TableCell>
-                  <TableCell>{entry.breakEnd || "-"}</TableCell>
-                  <TableCell>{formatDuration(entry.shiftDuration)}</TableCell>
-                  <TableCell>{formatDuration(entry.scheduleShiftDuration)}</TableCell>
                   <TableCell>
-                    {entry.difference !== null ? (
-                      <span
-                        className={cn(
-                          entry.difference > 0 && "text-green-600",
-                          entry.difference < 0 && "text-red-600"
-                        )}
-                      >
-                        {formatDifference(entry.difference)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">-</span>
-                    )}
+                    {format(parseISO(entry.endDate), "MMM d, yyyy")}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {entry.totalDays.toFixed(1)}
+                  </TableCell>
+                  <TableCell>
+                    <span className="truncate block max-w-[200px]" title={entry.reason || undefined}>
+                      {entry.reason || "-"}
+                    </span>
                   </TableCell>
                   <TableCell>{getStatusBadge(entry.status)}</TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => onEditEntry(entry)}
-                      disabled={!canEdit(entry)}
-                      title={canEdit(entry) ? "Edit entry" : "Cannot edit this entry"}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
+                  {isAdmin && (
+                    <TableCell>
+                      {entry.status === "pending" && (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                            onClick={() => onApprove?.(entry.id)}
+                            disabled={processingId === entry.id}
+                            title="Approve"
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => onReject?.(entry.id)}
+                            disabled={processingId === entry.id}
+                            title="Reject"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -469,7 +472,7 @@ export function TimesheetTable({
       {/* Pagination */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Showing {(pagination.page - 1) * pagination.limit + 1}-
+          Showing {Math.min((pagination.page - 1) * pagination.limit + 1, pagination.total)}-
           {Math.min(pagination.page * pagination.limit, pagination.total)} of{" "}
           {pagination.total} entries
         </p>

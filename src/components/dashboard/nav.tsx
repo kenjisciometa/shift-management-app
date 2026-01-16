@@ -42,7 +42,6 @@ import {
   ClipboardList,
   Palmtree,
   BarChart3,
-  CheckSquare,
   ClipboardPen,
   ArrowRightLeft,
 } from "lucide-react";
@@ -102,11 +101,6 @@ const teamNavItems = [
     title: "Tasks",
     href: "/tasks",
     icon: ClipboardList,
-  },
-  {
-    title: "Checklists",
-    href: "/checklists",
-    icon: CheckSquare,
   },
   {
     title: "Forms",

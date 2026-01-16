@@ -132,7 +132,7 @@ export function EditEntryDialog({
           <DialogTitle>Edit Time Entry</DialogTitle>
           <DialogDescription>
             {access.canViewAllTimesheets
-              ? `Edit time entry for ${entry.name}`
+              ? `Edit time entry for ${entry.displayName}`
               : "Edit your time entry"}
           </DialogDescription>
         </DialogHeader>
@@ -142,7 +142,7 @@ export function EditEntryDialog({
           {access.canViewAllTimesheets && (
             <div className="space-y-1">
               <Label className="text-muted-foreground">Employee</Label>
-              <p className="font-medium">{entry.name}</p>
+              <p className="font-medium">{entry.displayName}</p>
             </div>
           )}
 

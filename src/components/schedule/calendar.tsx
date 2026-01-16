@@ -706,6 +706,7 @@ export function ScheduleCalendar({
           positions={positions}
           organizationId={organizationId}
           isAdmin={isAdmin}
+          schedulingPreferences={settings.schedulingPreferences}
         />
 
         {/* Copy Shifts Dialog */}

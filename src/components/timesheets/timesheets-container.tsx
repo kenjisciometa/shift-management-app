@@ -78,10 +78,19 @@ export function TimesheetsContainer({
 
   // State
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const [data, setData] = useState<TimesheetTableRow[]>([]);
   const [period, setPeriod] = useState<PeriodFilterType>("month");
-  const [dateRange, setDateRange] = useState(() => getInitialDateRange("month"));
-  const [sort, setSort] = useState<TimesheetSort>({ field: "name", order: "asc" });
+  const [dateRange, setDateRange] = useState<{ start: Date; end: Date } | null>(null);
+  const [sort, setSort] = useState<TimesheetSort>({ field: "display_name", order: "asc" });
+
+  // Initialize date range on client only to avoid hydration mismatch
+  useEffect(() => {
+    if (!mounted) {
+      setDateRange(getInitialDateRange("month"));
+      setMounted(true);
+    }
+  }, [mounted]);
   const [pagination, setPagination] = useState<TimesheetPagination>({
     page: 1,
     limit: 50,
@@ -102,6 +111,11 @@ export function TimesheetsContainer({
    * Fetch timesheet data
    */
   const fetchData = useCallback(async () => {
+    // Skip fetch if dateRange not initialized yet (prevents hydration mismatch)
+    if (!dateRange) {
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -124,7 +138,8 @@ export function TimesheetsContainer({
             id,
             first_name,
             last_name,
-            display_name
+            display_name,
+            employee_code
           ),
           locations (
             id,
@@ -165,13 +180,19 @@ export function TimesheetsContainer({
           end_time,
           break_minutes,
           location_id,
+          position_id,
           profiles!shifts_user_id_fkey (
             id,
             first_name,
             last_name,
-            display_name
+            display_name,
+            employee_code
           ),
           locations (
+            id,
+            name
+          ),
+          positions (
             id,
             name
           )
@@ -337,6 +358,11 @@ export function TimesheetsContainer({
    * Handle CSV export
    */
   const handleExportCSV = async () => {
+    if (!dateRange) {
+      toast.error("Please wait for the page to load");
+      return;
+    }
+
     const startDate = format(dateRange.start, "yyyy-MM-dd");
     const endDate = format(dateRange.end, "yyyy-MM-dd");
 
@@ -401,12 +427,14 @@ export function TimesheetsContainer({
           {/* Period and Date Row */}
           <div className="flex flex-wrap items-center gap-4">
             <PeriodFilter value={period} onValueChange={handlePeriodChange} />
-            <DateRangePicker
-              period={period}
-              startDate={dateRange.start}
-              endDate={dateRange.end}
-              onDateChange={handleDateChange}
-            />
+            {dateRange && (
+              <DateRangePicker
+                period={period}
+                startDate={dateRange.start}
+                endDate={dateRange.end}
+                onDateChange={handleDateChange}
+              />
+            )}
           </div>
 
           {/* Additional Filters Row */}
@@ -477,6 +505,7 @@ function processTimeEntries(
       first_name: string | null;
       last_name: string | null;
       display_name: string | null;
+      employee_code: string | null;
     } | null;
     locations: {
       id: string;
@@ -491,13 +520,19 @@ function processTimeEntries(
     end_time: string;
     break_minutes: number | null;
     location_id: string | null;
+    position_id: string | null;
     profiles: {
       id: string;
       first_name: string | null;
       last_name: string | null;
       display_name: string | null;
+      employee_code: string | null;
     } | null;
     locations: {
+      id: string;
+      name: string;
+    } | null;
+    positions: {
       id: string;
       name: string;
     } | null;
@@ -561,11 +596,11 @@ function processTimeEntries(
 
     const workMinutes = shiftMinutes - breakMinutes;
 
-    // Get employee name
+    // Get employee info
     const profile = firstEntry.profiles;
-    const name = profile?.display_name ||
-      `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() ||
-      "Unknown";
+    const legalName = `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim() || "Unknown";
+    const displayName = profile?.display_name || legalName;
+    const personalId = profile?.employee_code || null;
 
     // Get location
     const location = firstEntry.locations;
@@ -601,14 +636,19 @@ function processTimeEntries(
     // Calculate difference (actual - scheduled) only if there's actual work
     const difference = workMinutes > 0 ? workMinutes - scheduledMinutes : null;
 
+    // Get position from scheduled shift
+    const positionName = scheduledShift?.positions?.name || "";
+
     rows.push({
       id: key,
       userId,
-      name,
+      personalId,
+      displayName,
+      legalName,
       date,
       locations: locationName,
       locationId: location?.id || null,
-      positions: "", // Would come from profile
+      positions: positionName,
       clockInTime,
       clockOutTime,
       autoClockOut,
@@ -644,14 +684,17 @@ function processTimeEntries(
     const shiftBreakMinutes = shift.break_minutes || 0;
     const scheduledMinutes = Math.round((shiftEnd - shiftStart) / 60000) - shiftBreakMinutes;
 
-    // Get employee name from shift's profile
+    // Get employee info from shift's profile
     const shiftProfile = shift.profiles;
-    const name = shiftProfile?.display_name ||
-      `${shiftProfile?.first_name || ""} ${shiftProfile?.last_name || ""}`.trim() ||
-      "Unknown";
+    const legalName = `${shiftProfile?.first_name || ""} ${shiftProfile?.last_name || ""}`.trim() || "Unknown";
+    const displayName = shiftProfile?.display_name || legalName;
+    const personalId = shiftProfile?.employee_code || null;
 
     // Get location from shift
     const locationName = shift.locations?.name || "";
+
+    // Get position from shift
+    const positionName = shift.positions?.name || "";
 
     // Determine status - scheduled shifts without clock in are "scheduled"
     const status: TimesheetStatus = "pending";
@@ -664,11 +707,13 @@ function processTimeEntries(
     rows.push({
       id: `shift_${shift.id}`,
       userId: shift.user_id,
-      name,
+      personalId,
+      displayName,
+      legalName,
       date: shiftDate,
       locations: locationName,
       locationId: shift.location_id,
-      positions: "",
+      positions: positionName,
       clockInTime: null,
       clockOutTime: null,
       autoClockOut: false,
@@ -701,8 +746,14 @@ function sortData(data: TimesheetTableRow[], sort: TimesheetSort): TimesheetTabl
     let comparison = 0;
 
     switch (sort.field) {
-      case "name":
-        comparison = a.name.localeCompare(b.name);
+      case "personal_id":
+        comparison = (a.personalId || "").localeCompare(b.personalId || "");
+        break;
+      case "display_name":
+        comparison = a.displayName.localeCompare(b.displayName);
+        break;
+      case "legal_name":
+        comparison = a.legalName.localeCompare(b.legalName);
         break;
       case "date":
         comparison = a.date.localeCompare(b.date);

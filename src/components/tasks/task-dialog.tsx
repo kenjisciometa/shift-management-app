@@ -216,6 +216,12 @@ export function TaskDialog({
         toast.success("Task updated");
       } else {
         // Create new task
+        console.log("Creating task with data:", {
+          organization_id: profile.organization_id,
+          title: formData.title,
+          created_by: profile.id,
+        });
+
         const { data: newTask, error: taskError } = await supabase
           .from("tasks")
           .insert({
@@ -230,10 +236,16 @@ export function TaskDialog({
           .select()
           .single();
 
-        if (taskError) throw taskError;
+        console.log("Task insert result:", { newTask, taskError });
+
+        if (taskError) {
+          console.error("Task insert error:", taskError);
+          throw taskError;
+        }
 
         // Create assignments
         if (formData.assignees.length > 0) {
+          console.log("Creating assignments for task:", newTask.id);
           const { error: assignError } = await supabase.from("task_assignments").insert(
             formData.assignees.map((userId) => ({
               task_id: newTask.id,
@@ -241,7 +253,11 @@ export function TaskDialog({
               assigned_by: profile.id,
             }))
           );
-          if (assignError) throw assignError;
+          console.log("Assignment insert result:", { assignError });
+          if (assignError) {
+            console.error("Assignment insert error:", assignError);
+            throw assignError;
+          }
         }
 
         toast.success("Task created");
@@ -249,8 +265,14 @@ export function TaskDialog({
 
       onOpenChange(false);
       router.refresh();
-    } catch (error) {
-      console.error(error);
+    } catch (error: unknown) {
+      // Log detailed error information
+      console.error("Task error:", error);
+      if (error && typeof error === "object") {
+        console.error("Error details:", JSON.stringify(error, null, 2));
+        console.error("Error message:", (error as { message?: string }).message);
+        console.error("Error code:", (error as { code?: string }).code);
+      }
       toast.error(task ? "Failed to update task" : "Failed to create task");
     } finally {
       setLoading(false);

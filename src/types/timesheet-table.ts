@@ -7,7 +7,9 @@ export type TimesheetStatus = "pending" | "approved" | "rejected";
 export type PeriodFilter = "day" | "week" | "month" | "quarter" | "year" | "custom";
 
 export type SortField =
-  | "name"
+  | "personal_id"
+  | "display_name"
+  | "legal_name"
   | "date"
   | "positions"
   | "clock_in_time"
@@ -25,8 +27,12 @@ export interface TimesheetTableRow {
   id: string;
   /** User ID of the employee */
   userId: string;
-  /** Employee full name */
-  name: string;
+  /** Employee code / Personal ID */
+  personalId: string | null;
+  /** Employee display name */
+  displayName: string;
+  /** Employee legal name (first_name + last_name) */
+  legalName: string;
   /** Work date (ISO format) */
   date: string;
   /** Work location(s) */

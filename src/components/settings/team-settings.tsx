@@ -45,6 +45,7 @@ import {
   GripVertical,
   Clock,
   Volume2,
+  ArrowRightLeft,
 } from "lucide-react";
 
 // Team Settings Types
@@ -65,10 +66,14 @@ export interface TeamSettings {
     defaultShiftDuration: number; // in hours
     breakDuration: number; // in minutes
   };
-  shiftAppearance: {
-    day: ShiftFieldConfig[];
-    week: ShiftFieldConfig[];
-    month: ShiftFieldConfig[];
+  shiftAppearance: ShiftFieldConfig[];
+  shiftSwapSettings: {
+    enabled: boolean;
+    requireAdminApproval: boolean;
+    autoUpdateSchedule: boolean;
+    allowCrossPositionSwaps: boolean;
+    maxDaysInAdvance: number;
+    notifyManagersOnRequest: boolean;
   };
   otherPreferences: {
     soundEffects: boolean;
@@ -86,25 +91,19 @@ export const defaultTeamSettings: TeamSettings = {
     defaultShiftDuration: 8,
     breakDuration: 30,
   },
-  shiftAppearance: {
-    day: [
-      { field: "location", visible: true },
-      { field: "time", visible: true },
-      { field: "position", visible: true },
-      { field: "name", visible: true },
-    ],
-    week: [
-      { field: "location", visible: true },
-      { field: "time", visible: true },
-      { field: "position", visible: true },
-      { field: "name", visible: true },
-    ],
-    month: [
-      { field: "location", visible: true },
-      { field: "time", visible: true },
-      { field: "position", visible: true },
-      { field: "name", visible: true },
-    ],
+  shiftAppearance: [
+    { field: "location", visible: true },
+    { field: "time", visible: true },
+    { field: "position", visible: true },
+    { field: "name", visible: true },
+  ],
+  shiftSwapSettings: {
+    enabled: true,
+    requireAdminApproval: true,
+    autoUpdateSchedule: true,
+    allowCrossPositionSwaps: true,
+    maxDaysInAdvance: 0,
+    notifyManagersOnRequest: true,
   },
   otherPreferences: {
     soundEffects: true,
@@ -170,6 +169,91 @@ function SortableItem({
   );
 }
 
+// Sortable Location-Position Group Component
+function SortableLocationPositionGroup({
+  locationFirst,
+  locationVisible,
+  positionVisible,
+  onSwap,
+  onLocationVisibilityChange,
+  onPositionVisibilityChange,
+}: {
+  locationFirst: boolean;
+  locationVisible: boolean;
+  positionVisible: boolean;
+  onSwap: () => void;
+  onLocationVisibilityChange: (visible: boolean) => void;
+  onPositionVisibilityChange: (visible: boolean) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: "location-position" });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const firstLabel = locationFirst ? "Location" : "Position";
+  const secondLabel = locationFirst ? "Position" : "Location";
+  const firstVisible = locationFirst ? locationVisible : positionVisible;
+  const secondVisible = locationFirst ? positionVisible : locationVisible;
+  const onFirstVisibilityChange = locationFirst ? onLocationVisibilityChange : onPositionVisibilityChange;
+  const onSecondVisibilityChange = locationFirst ? onPositionVisibilityChange : onLocationVisibilityChange;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 p-2 bg-background border rounded-md ${
+        isDragging ? "opacity-50 shadow-lg" : ""
+      }`}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing p-1 hover:bg-muted rounded"
+      >
+        <GripVertical className="h-4 w-4 text-muted-foreground" />
+      </div>
+      <div className="flex-1 flex items-center gap-2">
+        {/* First item */}
+        <div className={`flex items-center gap-1 flex-1 ${!firstVisible ? "opacity-50" : ""}`}>
+          <span className={`text-sm ${!firstVisible ? "line-through" : ""}`}>{firstLabel}</span>
+          <Switch
+            checked={firstVisible}
+            onCheckedChange={onFirstVisibilityChange}
+            className="h-5 w-9"
+          />
+        </div>
+        {/* Swap button */}
+        <button
+          type="button"
+          onClick={onSwap}
+          className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+          title="Swap order"
+        >
+          <ArrowRightLeft className="h-4 w-4" />
+        </button>
+        {/* Second item */}
+        <div className={`flex items-center gap-1 flex-1 ${!secondVisible ? "opacity-50" : ""}`}>
+          <span className={`text-sm ${!secondVisible ? "line-through" : ""}`}>{secondLabel}</span>
+          <Switch
+            checked={secondVisible}
+            onCheckedChange={onSecondVisibilityChange}
+            className="h-5 w-9"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface TeamSettingsComponentProps {
   organizationId: string;
   initialSettings: any;
@@ -188,23 +272,35 @@ export function TeamSettingsComponent({
     const savedSettings = initialSettings as any;
     if (!savedSettings) return defaultTeamSettings;
 
-    // Check if settings need migration (old format used string arrays)
-    const needsMigration = savedSettings.shiftAppearance?.day &&
-      typeof savedSettings.shiftAppearance.day[0] === "string";
+    // Check if settings need migration from old format (day/week/month object)
+    if (savedSettings.shiftAppearance?.day) {
+      // Old format: { day: [...], week: [...], month: [...] }
+      // Use day settings as the unified settings
+      const oldSettings = savedSettings.shiftAppearance.day;
 
-    if (needsMigration) {
-      const migrateArray = (arr: string[]): ShiftFieldConfig[] =>
-        arr.map((field) => ({ field: field as ShiftDisplayField, visible: true }));
+      // Check if it's string array format (even older)
+      if (typeof oldSettings[0] === "string") {
+        return {
+          ...defaultTeamSettings,
+          ...savedSettings,
+          shiftAppearance: oldSettings.map((field: string) => ({
+            field: field as ShiftDisplayField,
+            visible: true,
+          })),
+        };
+      }
 
+      // It's already ShiftFieldConfig[] format
       return {
         ...defaultTeamSettings,
         ...savedSettings,
-        shiftAppearance: {
-          day: migrateArray(savedSettings.shiftAppearance.day),
-          week: migrateArray(savedSettings.shiftAppearance.week),
-          month: migrateArray(savedSettings.shiftAppearance.month),
-        },
+        shiftAppearance: oldSettings,
       };
+    }
+
+    // Check if shiftAppearance is already in the new unified format (array)
+    if (Array.isArray(savedSettings.shiftAppearance)) {
+      return { ...defaultTeamSettings, ...savedSettings };
     }
 
     return { ...defaultTeamSettings, ...savedSettings };
@@ -218,35 +314,100 @@ export function TeamSettingsComponent({
     })
   );
 
-  const handleDragEnd = (event: DragEndEvent, view: "day" | "week" | "month") => {
+  // Get sortable items - treat location+position as single group
+  const getSortableItems = () => {
+    const items: string[] = [];
+    let locationPositionAdded = false;
+
+    for (const field of teamSettings.shiftAppearance) {
+      if (field.field === "location" || field.field === "position") {
+        if (!locationPositionAdded) {
+          items.push("location-position");
+          locationPositionAdded = true;
+        }
+      } else {
+        items.push(field.field);
+      }
+    }
+    return items;
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
     if (over && active.id !== over.id) {
+      const activeId = active.id as string;
+      const overId = over.id as string;
+
       setTeamSettings((prev) => {
-        const items = prev.shiftAppearance[view];
-        const oldIndex = items.findIndex((item) => item.field === active.id);
-        const newIndex = items.findIndex((item) => item.field === over.id);
+        const items = [...prev.shiftAppearance];
+
+        // Get location and position info
+        const locationIndex = items.findIndex((item) => item.field === "location");
+        const positionIndex = items.findIndex((item) => item.field === "position");
+        const locationFirst = locationIndex < positionIndex;
+        const locationItem = items[locationIndex];
+        const positionItem = items[positionIndex];
+        const groupStartIndex = Math.min(locationIndex, positionIndex);
+
+        // Remove location and position from items
+        const filteredItems = items.filter(
+          (item) => item.field !== "location" && item.field !== "position"
+        );
+
+        // Build new order based on sortable items
+        const sortableItems = getSortableItems();
+        const oldSortIndex = sortableItems.indexOf(activeId);
+        const newSortIndex = sortableItems.indexOf(overId);
+
+        // Reorder the sortable items
+        const newSortableOrder = arrayMove(sortableItems, oldSortIndex, newSortIndex);
+
+        // Rebuild the full array
+        const result: typeof items = [];
+        for (const sortId of newSortableOrder) {
+          if (sortId === "location-position") {
+            if (locationFirst) {
+              result.push(locationItem, positionItem);
+            } else {
+              result.push(positionItem, locationItem);
+            }
+          } else {
+            const item = filteredItems.find((f) => f.field === sortId);
+            if (item) result.push(item);
+          }
+        }
 
         return {
           ...prev,
-          shiftAppearance: {
-            ...prev.shiftAppearance,
-            [view]: arrayMove(items, oldIndex, newIndex),
-          },
+          shiftAppearance: result,
         };
       });
     }
   };
 
-  const handleVisibilityChange = (view: "day" | "week" | "month", field: ShiftDisplayField, visible: boolean) => {
+  // Swap location and position order
+  const handleSwapLocationPosition = () => {
+    setTeamSettings((prev) => {
+      const items = [...prev.shiftAppearance];
+      const locationIndex = items.findIndex((item) => item.field === "location");
+      const positionIndex = items.findIndex((item) => item.field === "position");
+
+      [items[locationIndex], items[positionIndex]] = [items[positionIndex], items[locationIndex]];
+
+      return {
+        ...prev,
+        shiftAppearance: items,
+      };
+    });
+  };
+
+  const handleVisibilityChange = (field: ShiftDisplayField, visible: boolean) => {
     setTeamSettings((prev) => ({
       ...prev,
-      shiftAppearance: {
-        ...prev.shiftAppearance,
-        [view]: prev.shiftAppearance[view].map((item) =>
-          item.field === field ? { ...item, visible } : item
-        ),
-      },
+      shiftAppearance: prev.shiftAppearance.map((item) =>
+        item.field === field ? { ...item, visible } : item
+      ),
     }));
   };
 
@@ -285,78 +446,80 @@ export function TeamSettingsComponent({
             Configure how time and dates are displayed
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Time Format</Label>
-            <Select
-              value={teamSettings.displayPreferences.timeFormat}
-              onValueChange={(value: "12h" | "24h") =>
-                setTeamSettings((prev) => ({
-                  ...prev,
-                  displayPreferences: {
-                    ...prev.displayPreferences,
-                    timeFormat: value,
-                  },
-                }))
-              }
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="12h">12-hour (AM/PM)</SelectItem>
-                <SelectItem value="24h">24-hour</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Time Format</Label>
+              <Select
+                value={teamSettings.displayPreferences.timeFormat}
+                onValueChange={(value: "12h" | "24h") =>
+                  setTeamSettings((prev) => ({
+                    ...prev,
+                    displayPreferences: {
+                      ...prev.displayPreferences,
+                      timeFormat: value,
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="12h">12-hour (AM/PM)</SelectItem>
+                  <SelectItem value="24h">24-hour</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-2">
-            <Label>Clock Type</Label>
-            <Select
-              value={teamSettings.displayPreferences.clockType}
-              onValueChange={(value: "local" | "world") =>
-                setTeamSettings((prev) => ({
-                  ...prev,
-                  displayPreferences: {
-                    ...prev.displayPreferences,
-                    clockType: value,
-                  },
-                }))
-              }
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="local">Local Time</SelectItem>
-                <SelectItem value="world">World Clock</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-2">
+              <Label>Clock Type</Label>
+              <Select
+                value={teamSettings.displayPreferences.clockType}
+                onValueChange={(value: "local" | "world") =>
+                  setTeamSettings((prev) => ({
+                    ...prev,
+                    displayPreferences: {
+                      ...prev.displayPreferences,
+                      clockType: value,
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">Local Time</SelectItem>
+                  <SelectItem value="world">World Clock</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-2">
-            <Label>Week Start Day</Label>
-            <Select
-              value={teamSettings.displayPreferences.weekStartDay}
-              onValueChange={(value: "sunday" | "monday" | "saturday") =>
-                setTeamSettings((prev) => ({
-                  ...prev,
-                  displayPreferences: {
-                    ...prev.displayPreferences,
-                    weekStartDay: value,
-                  },
-                }))
-              }
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sunday">Sunday</SelectItem>
-                <SelectItem value="monday">Monday</SelectItem>
-                <SelectItem value="saturday">Saturday</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="space-y-2">
+              <Label>Week Start Day</Label>
+              <Select
+                value={teamSettings.displayPreferences.weekStartDay}
+                onValueChange={(value: "sunday" | "monday" | "saturday") =>
+                  setTeamSettings((prev) => ({
+                    ...prev,
+                    displayPreferences: {
+                      ...prev.displayPreferences,
+                      weekStartDay: value,
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sunday">Sunday</SelectItem>
+                  <SelectItem value="monday">Monday</SelectItem>
+                  <SelectItem value="saturday">Saturday</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -372,62 +535,64 @@ export function TeamSettingsComponent({
             Default settings for shift scheduling
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Default Shift Duration</Label>
-            <Select
-              value={teamSettings.schedulingPreferences.defaultShiftDuration.toString()}
-              onValueChange={(value) =>
-                setTeamSettings((prev) => ({
-                  ...prev,
-                  schedulingPreferences: {
-                    ...prev.schedulingPreferences,
-                    defaultShiftDuration: parseInt(value),
-                  },
-                }))
-              }
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="4">4 hours</SelectItem>
-                <SelectItem value="5">5 hours</SelectItem>
-                <SelectItem value="6">6 hours</SelectItem>
-                <SelectItem value="7">7 hours</SelectItem>
-                <SelectItem value="8">8 hours</SelectItem>
-                <SelectItem value="9">9 hours</SelectItem>
-                <SelectItem value="10">10 hours</SelectItem>
-                <SelectItem value="12">12 hours</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Default Shift Duration</Label>
+              <Select
+                value={teamSettings.schedulingPreferences.defaultShiftDuration.toString()}
+                onValueChange={(value) =>
+                  setTeamSettings((prev) => ({
+                    ...prev,
+                    schedulingPreferences: {
+                      ...prev.schedulingPreferences,
+                      defaultShiftDuration: parseInt(value),
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="4">4 hours</SelectItem>
+                  <SelectItem value="5">5 hours</SelectItem>
+                  <SelectItem value="6">6 hours</SelectItem>
+                  <SelectItem value="7">7 hours</SelectItem>
+                  <SelectItem value="8">8 hours</SelectItem>
+                  <SelectItem value="9">9 hours</SelectItem>
+                  <SelectItem value="10">10 hours</SelectItem>
+                  <SelectItem value="12">12 hours</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-2">
-            <Label>Break Duration</Label>
-            <Select
-              value={teamSettings.schedulingPreferences.breakDuration.toString()}
-              onValueChange={(value) =>
-                setTeamSettings((prev) => ({
-                  ...prev,
-                  schedulingPreferences: {
-                    ...prev.schedulingPreferences,
-                    breakDuration: parseInt(value),
-                  },
-                }))
-              }
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="0">No break</SelectItem>
-                <SelectItem value="15">15 minutes</SelectItem>
-                <SelectItem value="30">30 minutes</SelectItem>
-                <SelectItem value="45">45 minutes</SelectItem>
-                <SelectItem value="60">1 hour</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="space-y-2">
+              <Label>Break Duration</Label>
+              <Select
+                value={teamSettings.schedulingPreferences.breakDuration.toString()}
+                onValueChange={(value) =>
+                  setTeamSettings((prev) => ({
+                    ...prev,
+                    schedulingPreferences: {
+                      ...prev.schedulingPreferences,
+                      breakDuration: parseInt(value),
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">No break</SelectItem>
+                  <SelectItem value="15">15 minutes</SelectItem>
+                  <SelectItem value="30">30 minutes</SelectItem>
+                  <SelectItem value="45">45 minutes</SelectItem>
+                  <SelectItem value="60">1 hour</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -441,92 +606,105 @@ export function TeamSettingsComponent({
           </CardTitle>
           <CardDescription>
             Drag and drop to reorder how shift information is displayed. Toggle visibility for each field.
+            Location and Position are displayed on the same row - their order determines left/right placement.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-6 md:grid-cols-3">
-            {/* Day View */}
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Preview Card */}
             <div className="space-y-3">
-              <Label className="text-base font-medium">Day View</Label>
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={(event) => handleDragEnd(event, "day")}
-              >
-                <SortableContext
-                  items={teamSettings.shiftAppearance.day.map((item) => item.field)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <div className="space-y-2">
-                    {teamSettings.shiftAppearance.day.map((item) => (
-                      <SortableItem
-                        key={item.field}
-                        id={item.field}
-                        label={fieldLabels[item.field]}
-                        visible={item.visible}
-                        onVisibilityChange={(visible) =>
-                          handleVisibilityChange("day", item.field, visible)
-                        }
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
+              <Label className="text-base font-medium">Preview</Label>
+              <div className="bg-blue-500 dark:bg-blue-600 border border-blue-600 dark:border-blue-700 rounded-lg p-2 text-white">
+                {(() => {
+                  const visibleFields = teamSettings.shiftAppearance.filter((item) => item.visible);
+                  const locationIndex = teamSettings.shiftAppearance.findIndex((f) => f.field === "location");
+                  const positionIndex = teamSettings.shiftAppearance.findIndex((f) => f.field === "position");
+                  const locationFirst = locationIndex !== -1 && (positionIndex === -1 || locationIndex < positionIndex);
+                  const showLocation = visibleFields.some((f) => f.field === "location");
+                  const showPosition = visibleFields.some((f) => f.field === "position");
+
+                  return visibleFields.map((item) => {
+                    if (item.field === "location") {
+                      return (
+                        <div key="location-position" className="flex items-center gap-1 text-xs opacity-80">
+                          {locationFirst ? (
+                            <>
+                              {showLocation && <span className="truncate">Main Office</span>}
+                              {showLocation && showPosition && <span>・</span>}
+                              {showPosition && <span className="truncate">Server</span>}
+                            </>
+                          ) : (
+                            <>
+                              {showPosition && <span className="truncate">Server</span>}
+                              {showLocation && showPosition && <span>・</span>}
+                              {showLocation && <span className="truncate">Main Office</span>}
+                            </>
+                          )}
+                        </div>
+                      );
+                    }
+                    if (item.field === "position") return null;
+                    if (item.field === "time") {
+                      return <div key="time" className="text-[10px] opacity-80 whitespace-nowrap">9:00 AM - 5:00 PM・8H</div>;
+                    }
+                    if (item.field === "name") {
+                      return <div key="name" className="font-medium text-sm truncate">John Doe</div>;
+                    }
+                    return null;
+                  });
+                })()}
+              </div>
             </div>
 
-            {/* Week View */}
+            {/* Config */}
             <div className="space-y-3">
-              <Label className="text-base font-medium">Week View</Label>
+              <Label className="text-base font-medium">Field Order & Visibility</Label>
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
-                onDragEnd={(event) => handleDragEnd(event, "week")}
+                onDragEnd={handleDragEnd}
               >
                 <SortableContext
-                  items={teamSettings.shiftAppearance.week.map((item) => item.field)}
+                  items={getSortableItems()}
                   strategy={verticalListSortingStrategy}
                 >
                   <div className="space-y-2">
-                    {teamSettings.shiftAppearance.week.map((item) => (
-                      <SortableItem
-                        key={item.field}
-                        id={item.field}
-                        label={fieldLabels[item.field]}
-                        visible={item.visible}
-                        onVisibilityChange={(visible) =>
-                          handleVisibilityChange("week", item.field, visible)
-                        }
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            </div>
+                    {(() => {
+                      const locationItem = teamSettings.shiftAppearance.find((item) => item.field === "location");
+                      const positionItem = teamSettings.shiftAppearance.find((item) => item.field === "position");
+                      const locationIndex = teamSettings.shiftAppearance.findIndex((item) => item.field === "location");
+                      const positionIndex = teamSettings.shiftAppearance.findIndex((item) => item.field === "position");
+                      const locationFirst = locationIndex < positionIndex;
 
-            {/* Month View */}
-            <div className="space-y-3">
-              <Label className="text-base font-medium">Month View</Label>
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={(event) => handleDragEnd(event, "month")}
-              >
-                <SortableContext
-                  items={teamSettings.shiftAppearance.month.map((item) => item.field)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <div className="space-y-2">
-                    {teamSettings.shiftAppearance.month.map((item) => (
-                      <SortableItem
-                        key={item.field}
-                        id={item.field}
-                        label={fieldLabels[item.field]}
-                        visible={item.visible}
-                        onVisibilityChange={(visible) =>
-                          handleVisibilityChange("month", item.field, visible)
+                      return getSortableItems().map((sortId) => {
+                        if (sortId === "location-position") {
+                          return (
+                            <SortableLocationPositionGroup
+                              key="location-position"
+                              locationFirst={locationFirst}
+                              locationVisible={locationItem?.visible ?? true}
+                              positionVisible={positionItem?.visible ?? true}
+                              onSwap={handleSwapLocationPosition}
+                              onLocationVisibilityChange={(visible) => handleVisibilityChange("location", visible)}
+                              onPositionVisibilityChange={(visible) => handleVisibilityChange("position", visible)}
+                            />
+                          );
                         }
-                      />
-                    ))}
+                        const item = teamSettings.shiftAppearance.find((f) => f.field === sortId);
+                        if (!item) return null;
+                        return (
+                          <SortableItem
+                            key={item.field}
+                            id={item.field}
+                            label={fieldLabels[item.field]}
+                            visible={item.visible}
+                            onVisibilityChange={(visible) =>
+                              handleVisibilityChange(item.field, visible)
+                            }
+                          />
+                        );
+                      });
+                    })()}
                   </div>
                 </SortableContext>
               </DndContext>

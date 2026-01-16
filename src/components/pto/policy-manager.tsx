@@ -5,14 +5,16 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,10 +37,6 @@ import {
   Plus,
   MoreHorizontal,
   Loader2,
-  Calendar,
-  Clock,
-  Users,
-  Shield,
   Sparkles,
 } from "lucide-react";
 import { PTOPolicyDialog } from "./policy-dialog";
@@ -160,112 +158,99 @@ export function PTOPolicyManager({
       </div>
 
       {policies.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          {policies.map((policy) => (
-            <Card key={policy.id} className="group">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                      <Palmtree className="h-5 w-5 text-green-600 dark:text-green-400" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">{policy.name}</CardTitle>
-                      <div className="flex items-center gap-2 mt-1">
-                        <Badge className={ptoTypeColors[policy.pto_type]}>
-                          {ptoTypeLabels[policy.pto_type]}
-                        </Badge>
-                        {!policy.is_active && (
-                          <Badge variant="secondary">Inactive</Badge>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 opacity-0 group-hover:opacity-100"
-                        disabled={processingId === policy.id}
-                      >
-                        {processingId === policy.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <MoreHorizontal className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleEdit(policy)}>
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleToggleActive(policy)}>
-                        {policy.is_active ? "Deactivate" : "Activate"}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => {
-                          setPolicyToDelete(policy);
-                          setDeleteDialogOpen(true);
-                        }}
-                      >
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <div className="text-muted-foreground">Annual Allowance</div>
-                      <div className="font-medium">
-                        {Number(policy.annual_allowance || 0).toFixed(1)} days
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <div className="text-muted-foreground">Accrual Rate</div>
-                      <div className="font-medium">
-                        {Number(policy.accrual_rate || 0).toFixed(2)} days/month
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Users className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <div className="text-muted-foreground">Max Carryover</div>
-                      <div className="font-medium">
-                        {Number(policy.max_carryover || 0).toFixed(1)} days
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Shield className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <div className="text-muted-foreground">Approval</div>
-                      <div className="font-medium">
-                        {policy.requires_approval ? "Required" : "Not Required"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {Number(policy.min_notice_days) > 0 && (
-                  <div className="mt-3 pt-3 border-t flex flex-wrap gap-2">
-                    <Badge variant="outline" className="text-xs">
-                      {policy.min_notice_days} day notice required
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Annual Allowance</TableHead>
+                <TableHead>Accrual Rate</TableHead>
+                <TableHead>Max Carryover</TableHead>
+                <TableHead>Notice Required</TableHead>
+                <TableHead>Approval</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-[60px]">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {policies.map((policy) => (
+                <TableRow key={policy.id}>
+                  <TableCell className="font-medium">{policy.name}</TableCell>
+                  <TableCell>
+                    <Badge className={ptoTypeColors[policy.pto_type]}>
+                      {ptoTypeLabels[policy.pto_type]}
                     </Badge>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                  </TableCell>
+                  <TableCell>
+                    {Number(policy.annual_allowance || 0).toFixed(1)} days
+                  </TableCell>
+                  <TableCell>
+                    {Number(policy.accrual_rate || 0).toFixed(2)} days/mo
+                  </TableCell>
+                  <TableCell>
+                    {Number(policy.max_carryover || 0).toFixed(1)} days
+                  </TableCell>
+                  <TableCell>
+                    {Number(policy.min_notice_days) > 0
+                      ? `${policy.min_notice_days} days`
+                      : "-"}
+                  </TableCell>
+                  <TableCell>
+                    {policy.requires_approval ? (
+                      <Badge variant="outline">Required</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">No</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {policy.is_active ? (
+                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                        Active
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">Inactive</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          disabled={processingId === policy.id}
+                        >
+                          {processingId === policy.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <MoreHorizontal className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleEdit(policy)}>
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleToggleActive(policy)}>
+                          {policy.is_active ? "Deactivate" : "Activate"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={() => {
+                            setPolicyToDelete(policy);
+                            setDeleteDialogOpen(true);
+                          }}
+                        >
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <Card>

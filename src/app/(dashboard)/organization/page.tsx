@@ -20,7 +20,7 @@ export default async function OrganizationPage() {
   const supabase = await getCachedSupabase();
 
   // Parallel fetch all data including organization
-  const [organizationResult, locationsResult, departmentsResult, teamMembersResult, ptoPoliciesResult] = await Promise.all([
+  const [organizationResult, locationsResult, departmentsResult, teamMembersResult] = await Promise.all([
     // Get organization directly
     supabase
       .from("organizations")
@@ -55,12 +55,6 @@ export default async function OrganizationPage() {
       .eq("status", "active")
       .in("role", ["admin", "owner", "manager"])
       .order("first_name"),
-    // Get PTO policies
-    supabase
-      .from("pto_policies")
-      .select("*")
-      .eq("organization_id", profile.organization_id)
-      .order("name"),
   ]);
 
   // Redirect if organization not found
@@ -78,7 +72,6 @@ export default async function OrganizationPage() {
           locations={locationsResult.data || []}
           departments={departmentsResult.data || []}
           teamMembers={teamMembersResult.data || []}
-          ptoPolicies={ptoPoliciesResult.data || []}
         />
       </div>
     </>

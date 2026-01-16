@@ -109,6 +109,88 @@ export async function createTimesheetNotification(
 }
 
 /**
+ * Create a notification for a shift swap request
+ */
+export async function createShiftSwapNotification(
+  supabase: any,
+  {
+    userId,
+    organizationId,
+    type,
+    requesterName,
+    targetName,
+    shiftDate,
+    swapId,
+  }: {
+    userId: string;
+    organizationId: string;
+    type: "swap_requested" | "swap_accepted" | "swap_approved" | "swap_rejected" | "swap_manager_notification";
+    requesterName: string;
+    targetName?: string;
+    shiftDate: string;
+    swapId: string;
+  }
+): Promise<void> {
+  const formatDate = (date: string) => {
+    return new Date(date).toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const dateStr = formatDate(shiftDate);
+
+  let title: string;
+  let body: string;
+  let notificationType: string;
+
+  switch (type) {
+    case "swap_requested":
+      title = "Shift Swap Request";
+      body = `${requesterName} has requested to swap shifts with you for ${dateStr}.`;
+      notificationType = "shift_swap_requested";
+      break;
+    case "swap_accepted":
+      title = "Shift Swap Accepted";
+      body = `${targetName || "The employee"} has accepted your shift swap request for ${dateStr}.`;
+      notificationType = "shift_swap_accepted";
+      break;
+    case "swap_approved":
+      title = "Shift Swap Approved";
+      body = `Your shift swap for ${dateStr} has been approved.`;
+      notificationType = "shift_swap_approved";
+      break;
+    case "swap_rejected":
+      title = "Shift Swap Rejected";
+      body = `Your shift swap request for ${dateStr} has been declined.`;
+      notificationType = "shift_swap_rejected";
+      break;
+    case "swap_manager_notification":
+      title = "Shift Swap Request Pending";
+      body = `${requesterName} has requested a shift swap with ${targetName || "another employee"} for ${dateStr}.`;
+      notificationType = "shift_swap_pending_approval";
+      break;
+    default:
+      return;
+  }
+
+  await createNotification(supabase, {
+    user_id: userId,
+    organization_id: organizationId,
+    type: notificationType,
+    title,
+    body,
+    data: {
+      swap_id: swapId,
+      requester_name: requesterName,
+      target_name: targetName,
+      shift_date: shiftDate,
+    },
+  });
+}
+
+/**
  * Create a notification for admins when a timesheet is submitted
  */
 export async function createTimesheetSubmittedAdminNotification(

@@ -1,38 +1,54 @@
 import { redirect } from "next/navigation";
 import { DashboardHeader } from "@/components/dashboard/header";
-import { PTODashboard } from "@/components/pto/dashboard";
+import { PTOContainer } from "@/components/pto/pto-container";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
 
-interface SearchParams {
-  year?: string;
-}
-
-export default async function PTOPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
+export default async function PTOPage() {
   const authData = await getAuthData();
 
   if (!authData) {
     redirect("/login");
   }
 
-  const params = await searchParams;
   const { user, profile } = authData;
   const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
-  
-  // Get year from search params or use current year
-  const selectedYear = params.year ? parseInt(params.year) : new Date().getFullYear();
   const currentYear = new Date().getFullYear();
-  const yearStart = new Date(currentYear, 0, 1).toISOString().split("T")[0];
-  const yearEnd = new Date(currentYear, 11, 31).toISOString().split("T")[0];
 
   const supabase = await getCachedSupabase();
 
-  // Parallel fetch all data with error handling
-  const [balancesResult, requestsResult, pendingRequestsResult, teamRequestsResult, policiesResult] = await Promise.all([
-    // Get PTO balances for the current user (selected year)
+  // Build requests query - fetch all requests for admins, own requests for employees
+  let requestsQuery = supabase
+    .from("pto_requests")
+    .select(`
+      *,
+      profiles!pto_requests_user_id_fkey (
+        id,
+        first_name,
+        last_name,
+        display_name,
+        avatar_url,
+        employee_code
+      )
+    `)
+    .eq("organization_id", profile.organization_id)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (!isAdmin) {
+    requestsQuery = requestsQuery.eq("user_id", user.id);
+  }
+
+  // Parallel fetch all data
+  const [requestsResult, balancesResult, policiesResult, employeesResult] = await Promise.all([
+    // Get PTO requests
+    requestsQuery.then((result) => {
+      if (result.error) {
+        console.error("Error fetching PTO requests:", result.error);
+        return { data: [], error: null };
+      }
+      return result;
+    }),
+    // Get PTO balances for the current user
     supabase
       .from("pto_balances")
       .select(`
@@ -41,7 +57,7 @@ export default async function PTOPage({
       `)
       .eq("user_id", user.id)
       .eq("organization_id", profile.organization_id)
-      .eq("year", selectedYear)
+      .eq("year", currentYear)
       .order("pto_type", { ascending: true })
       .then((result) => {
         if (result.error) {
@@ -49,67 +65,6 @@ export default async function PTOPage({
           return { data: [], error: null };
         }
         return result;
-      }),
-    // Get PTO requests for the current user (all time, but limit to recent)
-    supabase
-      .from("pto_requests")
-      .select(`
-        *,
-        profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
-      `)
-      .eq("user_id", user.id)
-      .eq("organization_id", profile.organization_id)
-      .order("created_at", { ascending: false })
-      .limit(50)
-      .then((result) => {
-        if (result.error) {
-          console.error("Error fetching PTO requests:", result.error);
-          return { data: [], error: null };
-        }
-        return result;
-      }),
-    // Get pending requests for admins
-    isAdmin
-      ? supabase
-          .from("pto_requests")
-          .select(`
-            *,
-            profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
-          `)
-          .eq("organization_id", profile.organization_id)
-          .eq("status", "pending")
-          .order("created_at", { ascending: false })
-          .limit(100)
-          .then((result) => {
-            if (result.error) {
-              console.error("Error fetching pending requests:", result.error);
-              return { data: [], error: null };
-            }
-            return result;
-          })
-      : Promise.resolve({ data: [], error: null }),
-    // Get team PTO requests for calendar view (approved and pending, current year)
-    // Optimized: Fetch requests where start_date <= yearEnd (uses index), then filter overlapping in memory
-    supabase
-      .from("pto_requests")
-      .select(`
-        *,
-        profiles!pto_requests_user_id_fkey (id, first_name, last_name, display_name, avatar_url)
-      `)
-      .eq("organization_id", profile.organization_id)
-      .in("status", ["pending", "approved"])
-      .lte("start_date", yearEnd)
-      .order("start_date", { ascending: true })
-      .then((result) => {
-        if (result.error) {
-          console.error("Error fetching team requests:", result.error);
-          return { data: [], error: null };
-        }
-        // Filter to include only requests that overlap with the year
-        const filtered = (result.data || []).filter((req) => {
-          return req.start_date <= yearEnd && req.end_date >= yearStart;
-        });
-        return { data: filtered, error: null };
       }),
     // Get PTO policies for the organization
     supabase
@@ -125,21 +80,41 @@ export default async function PTOPage({
         }
         return result;
       }),
+    // Get employees for filter dropdown (admin only)
+    isAdmin
+      ? supabase
+          .from("profiles")
+          .select("id, first_name, last_name, display_name")
+          .eq("organization_id", profile.organization_id)
+          .or("status.is.null,status.eq.active")
+          .order("first_name", { ascending: true })
+          .then((result) => {
+            if (result.error) {
+              console.error("Error fetching employees:", result.error);
+              return { data: [], error: null };
+            }
+            return {
+              data: (result.data || []).map((p) => ({
+                id: p.id,
+                name: p.display_name || `${p.first_name} ${p.last_name}`,
+              })),
+              error: null,
+            };
+          })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   return (
     <>
       <DashboardHeader title="PTO" />
       <div className="container mx-auto p-6">
-        <PTODashboard
+        <PTOContainer
           profile={profile}
-          balances={balancesResult.data || []}
-          requests={requestsResult.data || []}
-          pendingRequests={pendingRequestsResult.data || []}
-          teamRequests={teamRequestsResult.data || []}
+          initialRequests={requestsResult.data || []}
+          initialBalances={balancesResult.data || []}
           policies={policiesResult.data || []}
+          employees={employeesResult.data || []}
           isAdmin={isAdmin}
-          selectedYear={selectedYear}
         />
       </div>
     </>

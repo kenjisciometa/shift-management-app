@@ -3,6 +3,8 @@ import { DashboardHeader } from "@/components/dashboard/header";
 import { PushNotificationSettings } from "@/components/settings/push-notifications";
 import { TeamNotificationSettingsComponent } from "@/components/settings/team-notification-settings";
 import { TeamSettingsComponent } from "@/components/settings/team-settings";
+import { ShiftSwapSettingsComponent } from "@/components/settings/shift-swap-settings";
+import { PTOPolicyManager } from "@/components/pto/policy-manager";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAuthData } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -16,13 +18,26 @@ export default async function SettingsPage() {
 
   const { user, profile } = authData;
   const supabase = await createClient();
+  const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
 
-  // Fetch organization settings for team settings
-  const { data: organization } = await supabase
-    .from("organizations")
-    .select("id, settings")
-    .eq("id", profile.organization_id)
-    .single();
+  // Fetch organization settings and PTO policies in parallel
+  const [organizationResult, ptoPoliciesResult] = await Promise.all([
+    supabase
+      .from("organizations")
+      .select("id, settings")
+      .eq("id", profile.organization_id)
+      .single(),
+    isAdmin
+      ? supabase
+          .from("pto_policies")
+          .select("*")
+          .eq("organization_id", profile.organization_id)
+          .order("name")
+      : Promise.resolve({ data: null }),
+  ]);
+
+  const organization = organizationResult.data;
+  const ptoPolicies = ptoPoliciesResult.data || [];
 
   return (
     <>
@@ -32,6 +47,8 @@ export default async function SettingsPage() {
           <TabsList>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="schedule">Schedule</TabsTrigger>
+            <TabsTrigger value="shift-swap">Shift Swap</TabsTrigger>
+            {isAdmin && <TabsTrigger value="pto-policies">PTO Policies</TabsTrigger>}
             <TabsTrigger value="preferences">Preferences</TabsTrigger>
           </TabsList>
 
@@ -53,6 +70,26 @@ export default async function SettingsPage() {
               />
             )}
           </TabsContent>
+
+          <TabsContent value="shift-swap" className="space-y-6">
+            {organization && (
+              <ShiftSwapSettingsComponent
+                organizationId={organization.id}
+                initialSettings={organization.settings}
+              />
+            )}
+          </TabsContent>
+
+          {isAdmin && (
+            <TabsContent value="pto-policies" className="space-y-6">
+              {organization && (
+                <PTOPolicyManager
+                  policies={ptoPolicies}
+                  organizationId={organization.id}
+                />
+              )}
+            </TabsContent>
+          )}
 
           <TabsContent value="preferences" className="space-y-6">
             <div className="text-muted-foreground">

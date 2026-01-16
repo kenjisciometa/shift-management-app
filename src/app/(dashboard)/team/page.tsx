@@ -19,7 +19,7 @@ export default async function TeamPage() {
 
   // Parallel fetch all data - using admin client to bypass RLS for team members
   const [teamMembersResult, invitationsResult, departmentsResult, positionsResult, locationsResult] = await Promise.all([
-    // Get team members with their positions (using admin client to bypass RLS)
+    // Get team members with their positions and locations (using admin client to bypass RLS)
     adminSupabase
       .from("profiles")
       .select(`
@@ -27,7 +27,13 @@ export default async function TeamPage() {
         departments!profiles_department_id_fkey (id, name),
         user_positions (
           position_id,
+          wage_rate,
           positions (*)
+        ),
+        user_locations (
+          location_id,
+          is_primary,
+          locations (*)
         )
       `)
       .eq("organization_id", profile.organization_id)

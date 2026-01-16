@@ -144,43 +144,65 @@ export function DraggableShift({
     return format(date, "h:mm a");
   };
 
-  // Get appearance settings for current view
-  const appearanceSettings = settings.shiftAppearance[viewType] || settings.shiftAppearance.month;
+  // Get appearance settings - handle both old (day/week/month) and new (unified array) format
+  const appearanceSettings = Array.isArray(settings.shiftAppearance)
+    ? settings.shiftAppearance
+    : (settings.shiftAppearance as any)?.[viewType] || defaultTeamSettings.shiftAppearance;
 
   // Helper to check if a field is visible
   const isFieldVisible = (field: "time" | "position" | "location" | "name") => {
-    const fieldConfig = appearanceSettings.find((f) => f.field === field);
+    const fieldConfig = appearanceSettings.find((f: { field: string; visible: boolean }) => f.field === field);
     return fieldConfig ? fieldConfig.visible : true;
   };
 
   // Render fields in order from settings
   const renderFields = () => {
-    return appearanceSettings
-      .filter((fieldConfig) => fieldConfig.visible)
-      .map((fieldConfig) => {
-        switch (fieldConfig.field) {
-          case "time":
-            return (
-              <div key="time" className="text-[10px] opacity-80 whitespace-nowrap">
-                {formatTimeValue(startTime)} - {formatTimeValue(endTime)}・{durationText}
-              </div>
-            );
-          case "position":
-            return shift.positions ? (
-              <div key="position" className="text-xs opacity-80 truncate">{shift.positions.name}</div>
-            ) : null;
-          case "location":
-            return shift.locations ? (
-              <div key="location" className="text-xs opacity-80 truncate">{shift.locations.name}</div>
-            ) : null;
-          case "name":
-            return (
-              <div key="name" className="font-medium text-sm truncate">{getDisplayName()}</div>
-            );
-          default:
-            return null;
-        }
-      });
+    const visibleSettings = appearanceSettings.filter((f: { field: string; visible: boolean }) => f.visible);
+    const locationIndex = appearanceSettings.findIndex((f: { field: string }) => f.field === "location");
+    const positionIndex = appearanceSettings.findIndex((f: { field: string }) => f.field === "position");
+    const locationFirst = locationIndex !== -1 && (positionIndex === -1 || locationIndex < positionIndex);
+    const showLocation = isFieldVisible("location") && shift.locations;
+    const showPosition = isFieldVisible("position") && shift.positions;
+
+    return visibleSettings.map((fieldConfig: { field: string; visible: boolean }) => {
+      switch (fieldConfig.field) {
+        case "time":
+          return (
+            <div key="time" className="text-[10px] opacity-80 whitespace-nowrap">
+              {formatTimeValue(startTime)} - {formatTimeValue(endTime)}・{durationText}
+            </div>
+          );
+        case "location":
+          // Render location and position together on the same line
+          if (!showLocation && !showPosition) return null;
+          return (
+            <div key="location-position" className="flex items-center gap-1 text-xs opacity-80">
+              {locationFirst ? (
+                <>
+                  {showLocation && <span className="truncate">{shift.locations!.name}</span>}
+                  {showLocation && showPosition && <span>・</span>}
+                  {showPosition && <span className="truncate">{shift.positions!.name}</span>}
+                </>
+              ) : (
+                <>
+                  {showPosition && <span className="truncate">{shift.positions!.name}</span>}
+                  {showLocation && showPosition && <span>・</span>}
+                  {showLocation && <span className="truncate">{shift.locations!.name}</span>}
+                </>
+              )}
+            </div>
+          );
+        case "position":
+          // Position is rendered together with location, skip here
+          return null;
+        case "name":
+          return (
+            <div key="name" className="font-medium text-sm truncate">{getDisplayName()}</div>
+          );
+        default:
+          return null;
+      }
+    });
   };
 
   const isPublished = shift.is_published ?? false;
