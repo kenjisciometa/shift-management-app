@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 import { format } from "date-fns";
-
-const PRIVILEGED_ROLES = ["admin", "owner", "manager"];
 
 interface TimeEntryRow {
   id: string;
@@ -29,13 +28,12 @@ interface TimeEntryRow {
  */
 export async function GET(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
-    const isPrivileged = PRIVILEGED_ROLES.includes(profile.role || "");
+    const isPrivileged = isPrivilegedUser(profile.role);
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("start_date");
@@ -50,8 +48,6 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    const supabase = await getCachedSupabase();
 
     // Build query
     let query = supabase
@@ -90,10 +86,10 @@ export async function GET(request: NextRequest) {
       query = query.eq("location_id", locationId);
     }
 
-    const { data: timeEntries, error } = await query;
+    const { data: timeEntries, error: fetchError } = await query;
 
-    if (error) {
-      console.error("Error fetching time entries:", error);
+    if (fetchError) {
+      console.error("Error fetching time entries:", fetchError);
       return NextResponse.json(
         { error: "Failed to fetch data" },
         { status: 500 }

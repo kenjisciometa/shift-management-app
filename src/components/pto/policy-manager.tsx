@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut, apiDelete } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -72,7 +72,6 @@ export function PTOPolicyManager({
   organizationId,
 }: PTOPolicyManagerProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedPolicy, setSelectedPolicy] = useState<PTOPolicy | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -95,12 +94,11 @@ export function PTOPolicyManager({
 
     setProcessingId(policyToDelete.id);
     try {
-      const { error } = await supabase
-        .from("pto_policies")
-        .delete()
-        .eq("id", policyToDelete.id);
+      const response = await apiDelete(`/api/pto/policies/${policyToDelete.id}`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to delete policy");
+      }
 
       toast.success("Policy deleted");
       router.refresh();
@@ -117,12 +115,13 @@ export function PTOPolicyManager({
   const handleToggleActive = async (policy: PTOPolicy) => {
     setProcessingId(policy.id);
     try {
-      const { error } = await supabase
-        .from("pto_policies")
-        .update({ is_active: !policy.is_active })
-        .eq("id", policy.id);
+      const response = await apiPut(`/api/pto/policies/${policy.id}`, {
+        is_active: !policy.is_active,
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to update policy");
+      }
 
       toast.success(policy.is_active ? "Policy deactivated" : "Policy activated");
       router.refresh();

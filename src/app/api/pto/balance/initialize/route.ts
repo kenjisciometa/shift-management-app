@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
 import type { Database } from "@/types/database.types";
 
 type PTOBalanceInsert = Database["public"]["Tables"]["pto_balances"]["Insert"];
@@ -27,14 +27,12 @@ interface InitializeResponse {
  * POST /api/pto/balance/initialize
  * Initialize PTO balances for users based on active policies (admin only)
  */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    const { profile } = authData;
 
     // Check if user is admin or owner
     const isAdmin = profile.role === "admin" || profile.role === "owner";
@@ -55,8 +53,6 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-
-    const supabase = await getCachedSupabase();
 
     // Fetch active PTO policies for the organization
     const { data: policies, error: policiesError } = await supabase

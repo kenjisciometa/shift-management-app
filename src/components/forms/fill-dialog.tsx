@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import {
   Dialog,
@@ -52,7 +52,6 @@ export function FormFillDialog({
   onOpenChange,
 }: FormFillDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<Record<string, unknown>>({});
 
@@ -63,15 +62,14 @@ export function FormFillDialog({
 
     setLoading(true);
     try {
-      const { error } = await supabase.from("form_submissions").insert({
+      const response = await apiPost("/api/forms/submissions", {
         template_id: template.id,
-        organization_id: profile.organization_id,
-        user_id: profile.id,
-        data: formData as Json,
-        submitted_at: new Date().toISOString(),
+        data: formData,
       });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to submit form");
+      }
 
       toast.success("Form submitted successfully");
       onOpenChange(false);

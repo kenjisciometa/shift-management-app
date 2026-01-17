@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiDelete } from "@/lib/api-client";
 
 interface PushNotificationState {
   isSupported: boolean;
@@ -12,7 +12,6 @@ interface PushNotificationState {
 }
 
 export function usePushNotifications(userId?: string) {
-  const supabase = createClient();
   const [state, setState] = useState<PushNotificationState>({
     isSupported: false,
     isSubscribed: false,
@@ -116,24 +115,16 @@ export function usePushNotifications(userId?: string) {
         applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
       });
 
-      // Save subscription to database
+      // Save subscription to database via API
       if (userId) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error } = await (supabase as any).from("push_subscriptions").upsert(
-          {
-            user_id: userId,
-            endpoint: subscription.endpoint,
-            p256dh: arrayBufferToBase64(subscription.getKey("p256dh")),
-            auth: arrayBufferToBase64(subscription.getKey("auth")),
-            created_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "user_id,endpoint",
-          }
-        );
+        const response = await apiPost("/api/push-subscriptions", {
+          endpoint: subscription.endpoint,
+          p256dh: arrayBufferToBase64(subscription.getKey("p256dh")),
+          auth: arrayBufferToBase64(subscription.getKey("auth")),
+        });
 
-        if (error) {
-          console.error("Error saving subscription:", error);
+        if (!response.success) {
+          console.error("Error saving subscription:", response.error);
         }
       }
 
@@ -151,7 +142,7 @@ export function usePushNotifications(userId?: string) {
       }));
       throw error;
     }
-  }, [state.isSupported, userId, registerServiceWorker, supabase]);
+  }, [state.isSupported, userId, registerServiceWorker]);
 
   // Unsubscribe from push notifications
   const unsubscribe = useCallback(async () => {
@@ -164,14 +155,9 @@ export function usePushNotifications(userId?: string) {
       if (subscription) {
         await subscription.unsubscribe();
 
-        // Remove subscription from database
+        // Remove subscription from database via API
         if (userId) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (supabase as any)
-            .from("push_subscriptions")
-            .delete()
-            .eq("user_id", userId)
-            .eq("endpoint", subscription.endpoint);
+          await apiDelete(`/api/push-subscriptions?endpoint=${encodeURIComponent(subscription.endpoint)}`);
         }
       }
 
@@ -189,7 +175,7 @@ export function usePushNotifications(userId?: string) {
       }));
       throw error;
     }
-  }, [userId, supabase]);
+  }, [userId]);
 
   return {
     ...state,

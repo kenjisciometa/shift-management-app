@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 import type { Database } from "@/types/database.types";
 
 type PTORequestInsert = Database["public"]["Tables"]["pto_requests"]["Insert"];
@@ -8,24 +9,21 @@ type PTORequestInsert = Database["public"]["Tables"]["pto_requests"]["Insert"];
  * GET /api/pto/requests
  * List PTO requests for the current user or all requests (admin only)
  */
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("user_id");
     const status = searchParams.get("status");
     const limit = parseInt(searchParams.get("limit") || "50");
     const offset = parseInt(searchParams.get("offset") || "0");
 
-    const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+    const isAdmin = isPrivilegedUser(profile.role);
     const targetUserId = userId || (isAdmin ? null : user.id);
-
-    const supabase = await getCachedSupabase();
 
     let query = supabase
       .from("pto_requests")
@@ -45,10 +43,10 @@ export async function GET(request: Request) {
       query = query.eq("status", status);
     }
 
-    const { data: requests, error } = await query;
+    const { data: requests, error: fetchError } = await query;
 
-    if (error) {
-      console.error("Error fetching PTO requests:", error);
+    if (fetchError) {
+      console.error("Error fetching PTO requests:", fetchError);
       return NextResponse.json({ error: "Failed to fetch PTO requests" }, { status: 500 });
     }
 
@@ -63,14 +61,13 @@ export async function GET(request: Request) {
  * POST /api/pto/requests
  * Create a new PTO request
  */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const body = await request.json();
 
     const { start_date, end_date, pto_type, reason, attachment_urls } = body;
@@ -90,8 +87,6 @@ export async function POST(request: Request) {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end days
 
     // Check for date conflicts with existing approved/pending requests
-    const supabase = await getCachedSupabase();
-
     const { data: conflictingRequests } = await supabase
       .from("pto_requests")
       .select("id, status")
@@ -140,7 +135,7 @@ export async function POST(request: Request) {
       status: "pending",
     };
 
-    const { data: newRequest, error } = await supabase
+    const { data: newRequest, error: createError } = await supabase
       .from("pto_requests")
       .insert(requestData)
       .select(`
@@ -149,8 +144,8 @@ export async function POST(request: Request) {
       `)
       .single();
 
-    if (error) {
-      console.error("Error creating PTO request:", error);
+    if (createError) {
+      console.error("Error creating PTO request:", createError);
       return NextResponse.json({ error: "Failed to create PTO request" }, { status: 500 });
     }
 

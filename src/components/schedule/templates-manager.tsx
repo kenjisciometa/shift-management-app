@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiGet, apiDelete } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,7 +43,6 @@ export function TemplatesManager({
   onApplyTemplate,
 }: TemplatesManagerProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [templates, setTemplates] = useState<ShiftTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -55,15 +54,12 @@ export function TemplatesManager({
   const fetchTemplates = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("shift_templates")
-        .select("*")
-        .eq("organization_id", organizationId)
-        .eq("is_active", true)
-        .order("name");
+      const response = await apiGet<ShiftTemplate[]>("/api/shift-templates?is_active=true");
 
-      if (error) throw error;
-      setTemplates(data || []);
+      if (!response.success) {
+        throw new Error(response.error || "Failed to load templates");
+      }
+      setTemplates(response.data || []);
     } catch (error) {
       console.error(error);
       toast.error("Failed to load templates");
@@ -92,12 +88,11 @@ export function TemplatesManager({
     if (!confirm("Are you sure you want to delete this template?")) return;
 
     try {
-      const { error } = await supabase
-        .from("shift_templates")
-        .delete()
-        .eq("id", templateId);
+      const response = await apiDelete(`/api/shift-templates/${templateId}`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to delete template");
+      }
 
       toast.success("Template deleted");
       fetchTemplates();

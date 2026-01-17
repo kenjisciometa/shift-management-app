@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
 import type { Database } from "@/types/database.types";
 
 type PTOPolicyUpdate = Database["public"]["Tables"]["pto_policies"]["Update"];
@@ -9,18 +9,15 @@ type PTOPolicyInsert = Database["public"]["Tables"]["pto_policies"]["Insert"];
  * GET /api/pto/policies
  * Get PTO policies for the organization
  */
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error: authError, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (authError || !user || !profile || !supabase) {
+      return authError || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { profile } = authData;
     const { searchParams } = new URL(request.url);
     const isActive = searchParams.get("is_active");
-
-    const supabase = await getCachedSupabase();
 
     let query = supabase
       .from("pto_policies")
@@ -32,10 +29,10 @@ export async function GET(request: Request) {
       query = query.eq("is_active", isActive === "true");
     }
 
-    const { data: policies, error } = await query;
+    const { data: policies, error: fetchError } = await query;
 
-    if (error) {
-      console.error("Error fetching PTO policies:", error);
+    if (fetchError) {
+      console.error("Error fetching PTO policies:", fetchError);
       return NextResponse.json({ error: "Failed to fetch PTO policies" }, { status: 500 });
     }
 
@@ -50,14 +47,12 @@ export async function GET(request: Request) {
  * POST /api/pto/policies
  * Create a new PTO policy (admin only)
  */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error: authError, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (authError || !user || !profile || !supabase) {
+      return authError || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    const { profile } = authData;
 
     // Check if user is admin
     const isAdmin = profile.role === "admin" || profile.role === "owner";
@@ -71,18 +66,16 @@ export async function POST(request: Request) {
       organization_id: profile.organization_id,
     };
 
-    const supabase = await getCachedSupabase();
-
-    const { data: policy, error } = await supabase
+    const { data: policy, error: createError } = await supabase
       .from("pto_policies")
       .insert(policyData)
       .select()
       .single();
 
-    if (error) {
-      console.error("Error creating PTO policy:", error);
+    if (createError) {
+      console.error("Error creating PTO policy:", createError);
       return NextResponse.json(
-        { error: "Failed to create policy", details: error.message },
+        { error: "Failed to create policy", details: createError.message },
         { status: 500 }
       );
     }
@@ -98,14 +91,12 @@ export async function POST(request: Request) {
  * PUT /api/pto/policies
  * Update PTO policies (admin only)
  */
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error: authError, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (authError || !user || !profile || !supabase) {
+      return authError || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    const { profile } = authData;
 
     // Check if user is admin
     const isAdmin = profile.role === "admin" || profile.role === "owner";
@@ -119,8 +110,6 @@ export async function PUT(request: Request) {
     if (!Array.isArray(policies)) {
       return NextResponse.json({ error: "Policies must be an array" }, { status: 400 });
     }
-
-    const supabase = await getCachedSupabase();
 
     // Update each policy
     const updatePromises = policies.map((policy: PTOPolicyUpdate & { id: string }) => {

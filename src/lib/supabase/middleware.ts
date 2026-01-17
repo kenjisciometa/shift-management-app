@@ -43,6 +43,9 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith(route)
   );
 
+  // API routes handle their own authentication - don't redirect them
+  const isApiRoute = request.nextUrl.pathname.startsWith("/api/");
+
   // If user is authenticated and trying to access login/signup, redirect to dashboard
   if (user && (request.nextUrl.pathname === "/login" || request.nextUrl.pathname === "/signup")) {
     const url = request.nextUrl.clone();
@@ -50,7 +53,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (!user && !isPublicRoute && request.nextUrl.pathname !== "/") {
+  if (!user && !isPublicRoute && !isApiRoute && request.nextUrl.pathname !== "/") {
     // No user, redirect to login page
     const url = request.nextUrl.clone();
     url.pathname = "/login";

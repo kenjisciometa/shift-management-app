@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
-
-const PRIVILEGED_ROLES = ["admin", "owner", "manager"];
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 
 /**
  * PUT /api/timesheets/entries/[id]
@@ -12,12 +11,11 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id: entryId } = await params;
     const body = await request.json();
 
@@ -30,8 +28,7 @@ export async function PUT(
       comment,
     } = body;
 
-    const supabase = await getCachedSupabase();
-    const isPrivileged = PRIVILEGED_ROLES.includes(profile.role || "");
+    const isPrivileged = isPrivilegedUser(profile.role);
 
     // The entryId is a composite key: {userId}_{date}
     // We need to parse it and update the individual time entries

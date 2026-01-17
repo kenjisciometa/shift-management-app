@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +35,6 @@ export function LocationDialog({
   organizationId,
 }: LocationDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -92,7 +91,6 @@ export function LocationDialog({
 
     try {
       const data = {
-        organization_id: organizationId,
         name: formData.name.trim(),
         address: formData.address.trim() || null,
         latitude: parseFloat(formData.latitude),
@@ -104,17 +102,16 @@ export function LocationDialog({
       };
 
       if (location) {
-        const { error } = await supabase
-          .from("locations")
-          .update(data)
-          .eq("id", location.id);
-
-        if (error) throw error;
+        const response = await apiPut(`/api/organization/locations/${location.id}`, data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update location");
+        }
         toast.success("Location updated");
       } else {
-        const { error } = await supabase.from("locations").insert(data);
-
-        if (error) throw error;
+        const response = await apiPost("/api/organization/locations", data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to create location");
+        }
         toast.success("Location created");
       }
 
@@ -249,7 +246,7 @@ export function LocationDialog({
               <div>
                 <Label htmlFor="geofence">Enable Geofencing</Label>
                 <p className="text-xs text-muted-foreground">
-                  Require employees to be within radius to clock in
+                  Track employee location when clocking in/out
                 </p>
               </div>
               <Switch
@@ -265,7 +262,7 @@ export function LocationDialog({
               <div>
                 <Label htmlFor="allowOutside">Allow Clock Outside</Label>
                 <p className="text-xs text-muted-foreground">
-                  Allow clocking in/out outside geofence (with warning)
+                  Allow clocking outside radius (will be flagged)
                 </p>
               </div>
               <Switch

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,7 +50,6 @@ export function PositionDialog({
   organizationId,
 }: PositionDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -93,7 +92,6 @@ export function PositionDialog({
 
     try {
       const data = {
-        organization_id: organizationId,
         name: formData.name.trim(),
         color: formData.color,
         description: formData.description.trim() || null,
@@ -102,17 +100,16 @@ export function PositionDialog({
       };
 
       if (position) {
-        const { error } = await supabase
-          .from("positions")
-          .update(data)
-          .eq("id", position.id);
-
-        if (error) throw error;
+        const response = await apiPut(`/api/organization/positions/${position.id}`, data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update position");
+        }
         toast.success("Position updated");
       } else {
-        const { error } = await supabase.from("positions").insert(data);
-
-        if (error) throw error;
+        const response = await apiPost("/api/organization/positions", data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to create position");
+        }
         toast.success("Position created");
       }
 

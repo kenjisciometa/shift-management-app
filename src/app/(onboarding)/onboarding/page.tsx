@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiGet } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +19,6 @@ type Step = "choice" | "create-org" | "join-org";
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [step, setStep] = useState<Step>("choice");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,38 +56,13 @@ export default function OnboardingPage() {
     setLoading(true);
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const response = await apiPost("/api/onboarding/create-organization", {
+        name: orgName,
+        timezone: timezone,
+      });
 
-      if (!user) {
-        setError("You must be logged in");
-        setLoading(false);
-        return;
-      }
-
-      // Generate a slug from the organization name
-      const slug = orgName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/(^-|-$)/g, "");
-
-      // Use the database function to create organization and profile together
-      const { error: createError } = await supabase.rpc(
-        "create_organization_with_owner",
-        {
-          p_name: orgName,
-          p_slug: `${slug}-${Date.now().toString(36)}`,
-          p_timezone: timezone,
-          p_user_id: user.id,
-          p_email: user.email!,
-          p_first_name: user.user_metadata?.first_name || "Admin",
-          p_last_name: user.user_metadata?.last_name || "User",
-        }
-      );
-
-      if (createError) {
-        setError(createError.message);
+      if (!response.success) {
+        setError(response.error || "Failed to create organization");
         setLoading(false);
         return;
       }
@@ -107,60 +81,27 @@ export default function OnboardingPage() {
     setLoading(true);
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // Validate the invitation first
+      const validateResponse = await apiGet(
+        `/api/invitations/validate?token=${encodeURIComponent(inviteCode)}`
+      );
 
-      if (!user) {
-        setError("You must be logged in");
+      if (!validateResponse.success) {
+        setError(validateResponse.error || "Invalid or expired invitation code");
         setLoading(false);
         return;
       }
 
-      // Find the invitation
-      const { data: invitation, error: inviteError } = await supabase
-        .from("employee_invitations")
-        .select("*, organizations(*)")
-        .eq("token", inviteCode)
-        .eq("status", "pending")
-        .single();
-
-      if (inviteError || !invitation) {
-        setError("Invalid or expired invitation code");
-        setLoading(false);
-        return;
-      }
-
-      // Check if invitation is expired
-      if (new Date(invitation.expires_at) < new Date()) {
-        setError("This invitation has expired");
-        setLoading(false);
-        return;
-      }
-
-      // Create the user profile
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: user.id,
-        email: user.email!,
-        first_name: user.user_metadata?.first_name || invitation.email.split("@")[0],
-        last_name: user.user_metadata?.last_name || "",
-        organization_id: invitation.organization_id,
-        department_id: invitation.department_id,
-        role: invitation.role || "employee",
-        status: "active",
+      // Join the organization
+      const joinResponse = await apiPost("/api/invitations/join", {
+        token: inviteCode,
       });
 
-      if (profileError) {
-        setError(profileError.message);
+      if (!joinResponse.success) {
+        setError(joinResponse.error || "Failed to join organization");
         setLoading(false);
         return;
       }
-
-      // Update invitation status
-      await supabase
-        .from("employee_invitations")
-        .update({ status: "accepted" })
-        .eq("id", invitation.id);
 
       router.push("/dashboard");
       router.refresh();

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO, isPast, isToday } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut, apiDelete } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -199,7 +199,6 @@ export function TasksDashboard({
   isAdmin,
 }: TasksDashboardProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -264,24 +263,13 @@ export function TasksDashboard({
   const handleStatusChange = async (taskId: string, newStatus: string) => {
     setProcessingId(taskId);
     try {
-      const updateData: Record<string, unknown> = {
+      const response = await apiPut(`/api/tasks/${taskId}/status`, {
         status: newStatus,
-      };
+      });
 
-      if (newStatus === "completed") {
-        updateData.completed_at = new Date().toISOString();
-        updateData.completed_by = profile.id;
-      } else {
-        updateData.completed_at = null;
-        updateData.completed_by = null;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to update task");
       }
-
-      const { error } = await supabase
-        .from("tasks")
-        .update(updateData)
-        .eq("id", taskId);
-
-      if (error) throw error;
 
       toast.success(`Task marked as ${statusConfig[newStatus].label}`);
       router.refresh();
@@ -296,13 +284,11 @@ export function TasksDashboard({
   const handleDeleteTask = async (taskId: string) => {
     setProcessingId(taskId);
     try {
-      // First delete assignments
-      await supabase.from("task_assignments").delete().eq("task_id", taskId);
+      const response = await apiDelete(`/api/tasks/${taskId}`);
 
-      // Then delete task
-      const { error } = await supabase.from("tasks").delete().eq("id", taskId);
-
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to delete task");
+      }
 
       toast.success("Task deleted");
       router.refresh();

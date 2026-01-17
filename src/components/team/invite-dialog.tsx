@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,7 +52,6 @@ export function InviteDialog({
   departments,
 }: InviteDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -97,54 +96,36 @@ export function InviteDialog({
     setLoading(true);
 
     try {
-      // Generate unique token
-      const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
-
-      // Set expiry to 7 days from now
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
-
-      // Create invitation
-      const insertData = {
-        organization_id: profile.organization_id,
+      const response = await apiPost<{
+        id: string;
+        token: string;
+        email: string;
+        first_name: string;
+        last_name: string;
+      }>("/api/team/invitations", {
         email: formData.email.toLowerCase().trim(),
         first_name: formData.firstName.trim(),
         last_name: formData.lastName.trim(),
-        phone: formData.phone.trim() || null,
-        employee_code: formData.employeeCode.trim() || null,
+        phone: formData.phone.trim() || undefined,
+        employee_code: formData.employeeCode.trim() || undefined,
         role: formData.role,
-        department_id: formData.departmentId || null,
-        token,
-        status: "pending",
-        invited_by: profile.id,
-        expires_at: expiresAt.toISOString(),
-      };
-      console.log("Inserting invitation:", insertData);
+        department_id: formData.departmentId || undefined,
+      });
 
-      const { error } = await supabase.from("employee_invitations").insert(insertData);
-
-      if (error) {
-        console.error("Supabase insert error (full):", JSON.stringify(error, null, 2));
-        console.error("Error keys:", Object.keys(error));
-        if (error.code === "23505") {
-          toast.error("An invitation for this email already exists");
-        } else {
-          toast.error(error.message || "Failed to create invitation");
-        }
-        return;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to create invitation");
       }
 
-      // Generate invite link
+      // Generate invite link from returned token
       const baseUrl = window.location.origin;
-      const link = `${baseUrl}/invite/${token}`;
+      const link = `${baseUrl}/invite/${response.data!.token}`;
       setInviteLink(link);
 
       toast.success("Invitation created");
       router.refresh();
     } catch (error: unknown) {
       console.error("Invitation error:", error);
-      const supabaseError = error as { message?: string; code?: string; details?: string };
-      toast.error(supabaseError?.message || "Failed to create invitation");
+      toast.error(error instanceof Error ? error.message : "Failed to create invitation");
     } finally {
       setLoading(false);
     }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut, apiPost, apiDelete } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,7 +91,6 @@ export function EmployeeDialog({
   locations,
 }: EmployeeDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
@@ -209,61 +208,32 @@ export function EmployeeDialog({
         updateData.status = formData.status;
       }
 
-      const { error } = await supabase
-        .from("profiles")
-        .update(updateData)
-        .eq("id", employee.id);
-
-      if (error) throw error;
-
-      // Update user positions
-      // First, delete all existing positions for this user
-      const { error: deleteError } = await supabase
-        .from("user_positions")
-        .delete()
-        .eq("user_id", employee.id);
-
-      if (deleteError) throw deleteError;
-
-      // Then, insert new positions with wage rates
-      if (formData.positionIds.length > 0) {
-        const { error: insertError } = await supabase
-          .from("user_positions")
-          .insert(
-            formData.positionIds.map((positionId) => ({
-              user_id: employee.id,
-              position_id: positionId,
-              wage_rate: formData.positionWages[positionId]
-                ? parseFloat(formData.positionWages[positionId])
-                : null,
-            }))
-          );
-
-        if (insertError) throw insertError;
+      // Update profile
+      const profileResponse = await apiPut(`/api/team/members/${employee.id}`, updateData);
+      if (!profileResponse.success) {
+        throw new Error(profileResponse.error || "Failed to update profile");
       }
 
-      // Update user locations
-      // First, delete all existing locations for this user
-      const { error: deleteLocationsError } = await supabase
-        .from("user_locations")
-        .delete()
-        .eq("user_id", employee.id);
+      // Update user positions (bulk update)
+      const positionsData = {
+        positions: formData.positionIds.map((positionId) => ({
+          position_id: positionId,
+          wage_rate: formData.positionWages[positionId]
+            ? parseFloat(formData.positionWages[positionId])
+            : null,
+        })),
+      };
+      const positionsResponse = await apiPut(`/api/team/members/${employee.id}/positions`, positionsData);
+      if (!positionsResponse.success) {
+        throw new Error(positionsResponse.error || "Failed to update positions");
+      }
 
-      if (deleteLocationsError) throw deleteLocationsError;
-
-      // Then, insert new locations
-      if (formData.locationIds.length > 0) {
-        const { error: insertLocationsError } = await supabase
-          .from("user_locations")
-          .insert(
-            formData.locationIds.map((locationId, index) => ({
-              user_id: employee.id,
-              location_id: locationId,
-              is_primary: index === 0,
-            }))
-          );
-
-        if (insertLocationsError) throw insertLocationsError;
+      // Update user locations (bulk update)
+      const locationsResponse = await apiPut(`/api/team/members/${employee.id}/locations`, {
+        location_ids: formData.locationIds,
+      });
+      if (!locationsResponse.success) {
+        throw new Error(locationsResponse.error || "Failed to update locations");
       }
 
       toast.success("Employee updated successfully");
@@ -282,12 +252,10 @@ export function EmployeeDialog({
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ status: "inactive" })
-        .eq("id", employee.id);
-
-      if (error) throw error;
+      const response = await apiPut(`/api/team/members/${employee.id}`, { status: "inactive" });
+      if (!response.success) {
+        throw new Error(response.error || "Failed to deactivate employee");
+      }
 
       toast.success("Employee deactivated");
       setConfirmDeactivate(false);
@@ -306,12 +274,10 @@ export function EmployeeDialog({
 
     setLoading(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ status: "active" })
-        .eq("id", employee.id);
-
-      if (error) throw error;
+      const response = await apiPut(`/api/team/members/${employee.id}`, { status: "active" });
+      if (!response.success) {
+        throw new Error(response.error || "Failed to reactivate employee");
+      }
 
       toast.success("Employee reactivated");
       router.refresh();

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO, isToday, isYesterday } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
+import { apiGet, apiPost } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +60,7 @@ interface ChatRoomProps {
 
 export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
   const router = useRouter();
+  // Supabase client is kept only for realtime subscriptions
   const supabase = createClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,31 +123,35 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
     return format(date, "MMM d, h:mm a");
   };
 
-  // Mark messages as read
+  // Mark messages as read via API
   const markAsRead = async () => {
-    await supabase
-      .from("chat_participants")
-      .update({ last_read_at: new Date().toISOString() })
-      .eq("room_id", room.id)
-      .eq("user_id", profile.id);
+    await apiPost(`/api/chat/rooms/${room.id}/read`, {});
   };
 
-  // Fetch messages
+  // Fetch messages via API
   useEffect(() => {
     const fetchMessages = async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from("chat_messages")
-        .select("*")
-        .eq("room_id", room.id)
-        .eq("is_deleted", false)
-        .order("created_at", { ascending: true });
+      const response = await apiGet<Message[]>(`/api/chat/rooms/${room.id}/messages`, {
+        limit: 100,
+      });
 
-      if (error) {
-        console.error(error);
+      if (!response.success) {
+        console.error(response.error);
         toast.error("Failed to load messages");
       } else {
-        setMessages(data || []);
+        // Transform API response to match expected format
+        const messagesData = (response.data || []).map((msg: any) => ({
+          id: msg.id,
+          room_id: room.id,
+          sender_id: msg.sender?.id || "",
+          content: msg.content,
+          type: msg.type,
+          created_at: msg.created_at,
+          is_edited: msg.is_edited,
+          is_deleted: msg.is_deleted,
+        }));
+        setMessages(messagesData);
         // Mark as read when opening the room
         markAsRead();
       }
@@ -153,7 +159,7 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
     };
 
     fetchMessages();
-  }, [room.id, supabase]);
+  }, [room.id]);
 
   // Subscribe to real-time updates
   useEffect(() => {
@@ -263,17 +269,17 @@ export function ChatRoom({ profile, room, participants }: ChatRoomProps) {
     setMessageInput("");
 
     try {
-      const { error } = await supabase.from("chat_messages").insert({
-        room_id: room.id,
-        sender_id: profile.id,
+      const response = await apiPost(`/api/chat/rooms/${room.id}/messages`, {
         content,
         type: "text",
       });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to send message");
+      }
 
-      // Update last_read_at for current user
-      await markAsRead();
+      // Note: Message will be added via realtime subscription
+      // Mark as read is handled by the API
     } catch (error) {
       console.error(error);
       toast.error("Failed to send message");

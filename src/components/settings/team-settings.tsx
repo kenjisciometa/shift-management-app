@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut } from "@/lib/api-client";
 import type { Json } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -264,7 +264,6 @@ export function TeamSettingsComponent({
   initialSettings,
 }: TeamSettingsComponentProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [savingTeamSettings, setSavingTeamSettings] = useState(false);
 
   // Team Settings state - handle migration from old format
@@ -414,14 +413,13 @@ export function TeamSettingsComponent({
   const handleSaveTeamSettings = async () => {
     setSavingTeamSettings(true);
     try {
-      const { error } = await supabase
-        .from("organizations")
-        .update({
-          settings: teamSettings as unknown as Json,
-        })
-        .eq("id", organizationId);
+      const response = await apiPut("/api/organization", {
+        settings: teamSettings as unknown as Json,
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to save team settings");
+      }
 
       toast.success("Team settings saved");
       router.refresh();

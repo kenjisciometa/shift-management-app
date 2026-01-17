@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiGet, apiPost } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -56,7 +56,6 @@ export function PTOBalanceInitializeDialog({
   onSuccess,
 }: PTOBalanceInitializeDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [fetchingUsers, setFetchingUsers] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -83,14 +82,15 @@ export function PTOBalanceInitializeDialog({
 
   const fetchUserCount = async () => {
     try {
-      const { count, error } = await supabase
-        .from("profiles")
-        .select("*", { count: "exact", head: true })
-        .eq("organization_id", organizationId)
-        .eq("status", "active");
+      // Use team members API with limit=1 just to get the count
+      const response = await apiGet<{ pagination: { total: number } }>("/api/team/members", {
+        status: "active",
+        limit: 1,
+      });
 
-      if (error) throw error;
-      setTotalUserCount(count || 0);
+      if (response.success && response.data?.pagination) {
+        setTotalUserCount(response.data.pagination.total);
+      }
     } catch (error) {
       console.error("Error fetching user count:", error);
     }
@@ -112,15 +112,16 @@ export function PTOBalanceInitializeDialog({
   const fetchTeamMembers = async () => {
     setFetchingUsers(true);
     try {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("id, first_name, last_name, display_name, avatar_url, role")
-        .eq("organization_id", organizationId)
-        .eq("status", "active")
-        .order("first_name");
+      const response = await apiGet<TeamMember[]>("/api/team/members", {
+        status: "active",
+        limit: 200,
+      });
 
-      if (error) throw error;
-      setTeamMembers(data || []);
+      if (!response.success) {
+        throw new Error(response.error || "Failed to load team members");
+      }
+
+      setTeamMembers(response.data || []);
     } catch (error) {
       console.error("Error fetching team members:", error);
       toast.error("Failed to load team members");
@@ -184,21 +185,18 @@ export function PTOBalanceInitializeDialog({
         requestBody.user_ids = formData.selectedUserIds;
       }
 
-      const response = await fetch("/api/pto/balance/initialize", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const response = await apiPost<{
+        created: number;
+        updated: number;
+        skipped: number;
+        errors: string[];
+      }>("/api/pto/balance/initialize", requestBody);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to initialize balances");
+      if (!response.success) {
+        throw new Error(response.error || "Failed to initialize balances");
       }
 
-      const result = data.data;
+      const result = response.data!;
       const totalProcessed = result.created + result.skipped + result.updated;
 
       if (result.errors.length > 0) {

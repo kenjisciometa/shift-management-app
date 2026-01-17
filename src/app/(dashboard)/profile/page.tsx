@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { ProfileSettings } from "@/components/profile/settings";
+import { SecuritySettings } from "@/components/profile/security-settings";
 import { getAuthData } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -38,13 +39,14 @@ export default async function ProfilePage() {
   return (
     <>
       <DashboardHeader title="My Profile" />
-      <div className="container mx-auto p-6 max-w-3xl">
+      <div className="container mx-auto p-6 max-w-3xl space-y-6">
         <ProfileSettings
           user={{ id: user.id, email: user.email || "" }}
           profile={profile}
           department={department}
           userLocations={userLocations || []}
         />
+        <SecuritySettings />
       </div>
     </>
   );

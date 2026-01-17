@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut, apiDelete } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,7 +54,6 @@ export function TemplateDialog({
   onSaved,
 }: TemplateDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -108,7 +107,6 @@ export function TemplateDialog({
 
     try {
       const templateData = {
-        organization_id: organizationId,
         name: formData.name.trim(),
         description: formData.description.trim() || null,
         start_time: formData.startTime,
@@ -120,17 +118,16 @@ export function TemplateDialog({
       };
 
       if (isEditing && template) {
-        const { error } = await supabase
-          .from("shift_templates")
-          .update(templateData)
-          .eq("id", template.id);
-
-        if (error) throw error;
+        const response = await apiPut(`/api/shift-templates/${template.id}`, templateData);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update template");
+        }
         toast.success("Template updated successfully");
       } else {
-        const { error } = await supabase.from("shift_templates").insert(templateData);
-
-        if (error) throw error;
+        const response = await apiPost("/api/shift-templates", templateData);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to create template");
+        }
         toast.success("Template created successfully");
       }
 
@@ -153,12 +150,11 @@ export function TemplateDialog({
     setDeleting(true);
 
     try {
-      const { error } = await supabase
-        .from("shift_templates")
-        .delete()
-        .eq("id", template.id);
+      const response = await apiDelete(`/api/shift-templates/${template.id}`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to delete template");
+      }
 
       toast.success("Template deleted successfully");
       onOpenChange(false);

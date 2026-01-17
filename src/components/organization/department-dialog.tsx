@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,7 +60,6 @@ export function DepartmentDialog({
   teamMembers,
 }: DepartmentDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -106,7 +105,6 @@ export function DepartmentDialog({
 
     try {
       const data = {
-        organization_id: organizationId,
         name: formData.name.trim(),
         code: formData.code.trim() || null,
         description: formData.description.trim() || null,
@@ -116,17 +114,16 @@ export function DepartmentDialog({
       };
 
       if (department) {
-        const { error } = await supabase
-          .from("departments")
-          .update(data)
-          .eq("id", department.id);
-
-        if (error) throw error;
+        const response = await apiPut(`/api/organization/departments/${department.id}`, data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update department");
+        }
         toast.success("Department updated");
       } else {
-        const { error } = await supabase.from("departments").insert(data);
-
-        if (error) throw error;
+        const response = await apiPost("/api/organization/departments", data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to create department");
+        }
         toast.success("Department created");
       }
 

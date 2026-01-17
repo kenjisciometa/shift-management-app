@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 import { createTimesheetNotification } from "@/lib/notifications";
 
 /**
@@ -7,27 +8,24 @@ import { createTimesheetNotification } from "@/lib/notifications";
  * Reject a timesheet (admin/manager only)
  */
 export async function PUT(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
     const body = await request.json();
     const reviewComment = body.review_comment || null;
 
     // Check if user is admin or manager
-    const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+    const isAdmin = isPrivilegedUser(profile.role);
     if (!isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-
-    const supabase = await getCachedSupabase();
 
     // Get the existing timesheet
     const { data: existingTimesheet, error: fetchError } = await supabase

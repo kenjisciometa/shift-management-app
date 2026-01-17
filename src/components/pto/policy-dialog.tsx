@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +51,6 @@ export function PTOPolicyDialog({
   organizationId,
 }: PTOPolicyDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -103,7 +102,6 @@ export function PTOPolicyDialog({
 
     try {
       const data = {
-        organization_id: organizationId,
         name: formData.name.trim(),
         pto_type: formData.ptoType,
         annual_allowance: parseFloat(formData.annualAllowance) || 0,
@@ -115,27 +113,16 @@ export function PTOPolicyDialog({
       };
 
       if (policy) {
-        const { error } = await supabase
-          .from("pto_policies")
-          .update(data)
-          .eq("id", policy.id);
-
-        if (error) throw error;
+        const response = await apiPut(`/api/pto/policies/${policy.id}`, data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update policy");
+        }
         toast.success("Policy updated");
       } else {
-        const response = await fetch("/api/pto/policies", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(data),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || "Failed to create policy");
+        const response = await apiPost("/api/pto/policies", data);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to create policy");
         }
-
         toast.success("Policy created");
       }
 

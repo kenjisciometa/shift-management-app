@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut, apiDelete, apiUpload } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -32,6 +40,9 @@ import {
   Briefcase,
   Calendar,
   Hash,
+  Pencil,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -65,7 +76,6 @@ export function ProfileSettings({
   userLocations,
 }: ProfileSettingsProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [saving, setSaving] = useState(false);
 
   // Form state
@@ -81,6 +91,15 @@ export function ProfileSettings({
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Email change dialog state
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailForm, setEmailForm] = useState({
+    new_email: "",
+    password: "",
+  });
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [showEmailPassword, setShowEmailPassword] = useState(false);
 
   // Allowed image formats and max size
   const ALLOWED_FORMATS = ["image/jpeg", "image/png", "image/gif", "image/webp"];
@@ -105,42 +124,18 @@ export function ProfileSettings({
 
     setUploadingAvatar(true);
     try {
-      // Generate unique filename
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-      const filePath = `avatars/${fileName}`;
+      const formData = new FormData();
+      formData.append("avatar", file);
+      const response = await apiUpload<{ avatar_url: string }>(
+        "/api/profile/avatar",
+        formData
+      );
 
-      // Delete old avatar if exists
-      if (avatarUrl) {
-        const oldPath = avatarUrl.split("/avatars/")[1];
-        if (oldPath) {
-          await supabase.storage.from("avatars").remove([`avatars/${oldPath}`]);
-        }
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Failed to upload photo");
       }
 
-      // Upload new avatar
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(filePath, file);
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(filePath);
-
-      const newAvatarUrl = urlData.publicUrl;
-
-      // Update profile record
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: newAvatarUrl })
-        .eq("id", user.id);
-
-      if (updateError) throw updateError;
-
-      setAvatarUrl(newAvatarUrl);
+      setAvatarUrl(response.data.avatar_url);
       toast.success("Profile photo updated");
       router.refresh();
     } catch (error) {
@@ -156,19 +151,11 @@ export function ProfileSettings({
 
     setUploadingAvatar(true);
     try {
-      // Delete from storage
-      const oldPath = avatarUrl.split("/avatars/")[1];
-      if (oldPath) {
-        await supabase.storage.from("avatars").remove([`avatars/${oldPath}`]);
+      const response = await apiDelete("/api/profile/avatar");
+
+      if (!response.success) {
+        throw new Error(response.error || "Failed to remove photo");
       }
-
-      // Update profile record
-      const { error } = await supabase
-        .from("profiles")
-        .update({ avatar_url: null })
-        .eq("id", user.id);
-
-      if (error) throw error;
 
       setAvatarUrl(null);
       toast.success("Photo removed");
@@ -219,17 +206,16 @@ export function ProfileSettings({
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          first_name: form.first_name.trim(),
-          last_name: form.last_name.trim(),
-          display_name: form.display_name.trim() || null,
-          phone: form.phone.trim() || null,
-        })
-        .eq("id", user.id);
+      const response = await apiPut("/api/profile", {
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        display_name: form.display_name.trim() || null,
+        phone: form.phone.trim() || null,
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to update profile");
+      }
 
       toast.success("Profile updated");
       router.refresh();
@@ -238,6 +224,45 @@ export function ProfileSettings({
       toast.error("Failed to update profile");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    if (!emailForm.new_email || !emailForm.password) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailForm.new_email)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+
+    if (emailForm.new_email.toLowerCase() === user.email.toLowerCase()) {
+      toast.error("New email must be different from current email");
+      return;
+    }
+
+    setSavingEmail(true);
+    try {
+      const response = await apiPut("/api/profile/email", {
+        new_email: emailForm.new_email,
+        password: emailForm.password,
+      });
+
+      if (!response.success) {
+        throw new Error(response.error || "Failed to request email change");
+      }
+
+      toast.success("Confirmation email sent. Please check both your current and new email addresses.");
+      setEmailDialogOpen(false);
+      setEmailForm({ new_email: "", password: "" });
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to request email change");
+    } finally {
+      setSavingEmail(false);
     }
   };
 
@@ -429,7 +454,16 @@ export function ProfileSettings({
               <Label className="text-muted-foreground">Email</Label>
               <div className="flex items-center gap-2 p-2 bg-muted rounded-md">
                 <Mail className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm">{user.email}</span>
+                <span className="text-sm flex-1">{user.email}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2"
+                  onClick={() => setEmailDialogOpen(true)}
+                >
+                  <Pencil className="h-3 w-3 mr-1" />
+                  Change
+                </Button>
               </div>
             </div>
             <div className="space-y-2">
@@ -501,10 +535,98 @@ export function ProfileSettings({
 
           <Separator className="my-4" />
           <p className="text-xs text-muted-foreground">
-            Contact your administrator to update email, role, department, or location assignments.
+            Contact your administrator to update role, department, or location assignments.
+            You can change your password in the Security section below.
           </p>
         </CardContent>
       </Card>
+
+      {/* Email Change Dialog */}
+      <Dialog open={emailDialogOpen} onOpenChange={setEmailDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Email Address</DialogTitle>
+            <DialogDescription>
+              Enter your new email address. You will need to confirm the change via email.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="dialog-current-email">Current Email</Label>
+              <Input
+                id="dialog-current-email"
+                value={user.email}
+                disabled
+                className="bg-muted"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dialog-new-email">New Email Address</Label>
+              <Input
+                id="dialog-new-email"
+                type="email"
+                value={emailForm.new_email}
+                onChange={(e) =>
+                  setEmailForm((prev) => ({
+                    ...prev,
+                    new_email: e.target.value,
+                  }))
+                }
+                placeholder="Enter new email address"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dialog-email-password">Password</Label>
+              <div className="relative">
+                <Input
+                  id="dialog-email-password"
+                  type={showEmailPassword ? "text" : "password"}
+                  value={emailForm.password}
+                  onChange={(e) =>
+                    setEmailForm((prev) => ({
+                      ...prev,
+                      password: e.target.value,
+                    }))
+                  }
+                  placeholder="Enter your password to confirm"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEmailPassword(!showEmailPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showEmailPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Enter your current password to verify your identity
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEmailDialogOpen(false);
+                setEmailForm({ new_email: "", password: "" });
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleChangeEmail} disabled={savingEmail}>
+              {savingEmail && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Request Change
+            </Button>
+          </DialogFooter>
+          <p className="text-xs text-muted-foreground text-center">
+            A confirmation email will be sent to both addresses.
+          </p>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

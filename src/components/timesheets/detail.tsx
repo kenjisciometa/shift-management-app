@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { format, parseISO, differenceInMinutes, eachDayOfInterval, isSameDay, setHours, setMinutes } from "date-fns";
+import { format, parseISO, differenceInMinutes, setHours, setMinutes } from "date-fns";
 import type { Database } from "@/types/database.types";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -115,7 +115,6 @@ export function TimesheetDetail({
   isAdmin,
 }: TimesheetDetailProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(initialTimeEntries);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState<{
@@ -308,12 +307,13 @@ export function TimesheetDetail({
       const [hours, minutes] = editTime.split(":").map(Number);
       const newTimestamp = setMinutes(setHours(editingEntry.currentTime, hours), minutes);
 
-      const { error } = await supabase
-        .from("time_entries")
-        .update({ timestamp: newTimestamp.toISOString() })
-        .eq("id", editingEntry.entryId);
+      const response = await apiPut(`/api/time-entries/${editingEntry.entryId}`, {
+        timestamp: newTimestamp.toISOString(),
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to update time entry");
+      }
 
       // Update local state
       setTimeEntries((prev) =>

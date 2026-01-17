@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { DashboardHeader } from "@/components/dashboard/header";
 import { OrganizationSettings } from "@/components/organization/settings";
+import { LocationsSettings } from "@/components/settings/locations-settings";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAuthData, getCachedSupabase } from "@/lib/auth";
 
 export default async function OrganizationPage() {
@@ -19,20 +21,14 @@ export default async function OrganizationPage() {
 
   const supabase = await getCachedSupabase();
 
-  // Parallel fetch all data including organization
-  const [organizationResult, locationsResult, departmentsResult, teamMembersResult] = await Promise.all([
+  // Parallel fetch all data including organization and locations
+  const [organizationResult, departmentsResult, teamMembersResult, locationsResult] = await Promise.all([
     // Get organization directly
     supabase
       .from("organizations")
       .select("*")
       .eq("id", profile.organization_id)
       .single(),
-    // Get locations
-    supabase
-      .from("locations")
-      .select("*")
-      .eq("organization_id", profile.organization_id)
-      .order("name"),
     // Get departments
     supabase
       .from("departments")
@@ -55,6 +51,12 @@ export default async function OrganizationPage() {
       .eq("status", "active")
       .in("role", ["admin", "owner", "manager"])
       .order("first_name"),
+    // Get locations
+    supabase
+      .from("locations")
+      .select("*")
+      .eq("organization_id", profile.organization_id)
+      .order("name"),
   ]);
 
   // Redirect if organization not found
@@ -66,13 +68,28 @@ export default async function OrganizationPage() {
     <>
       <DashboardHeader title="Organization" profile={profile} />
       <div className="container mx-auto p-6">
-        <OrganizationSettings
-          profile={profile}
-          organization={organizationResult.data}
-          locations={locationsResult.data || []}
-          departments={departmentsResult.data || []}
-          teamMembers={teamMembersResult.data || []}
-        />
+        <Tabs defaultValue="general" className="space-y-6">
+          <TabsList>
+            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="locations">Locations</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="general" className="space-y-6">
+            <OrganizationSettings
+              profile={profile}
+              organization={organizationResult.data}
+              departments={departmentsResult.data || []}
+              teamMembers={teamMembersResult.data || []}
+            />
+          </TabsContent>
+
+          <TabsContent value="locations" className="space-y-6">
+            <LocationsSettings
+              locations={locationsResult.data || []}
+              organizationId={organizationResult.data.id}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
     </>
   );

@@ -3,20 +3,47 @@ import type { Database } from "@/types/database.types";
 type NotificationInsert = Database["public"]["Tables"]["notifications"]["Insert"];
 
 /**
- * Create a notification for a user
+ * Create a notification for a user via API
+ * This uses the server-side API to avoid RLS permission issues
  */
 export async function createNotification(
-  supabase: any,
-  notification: Omit<NotificationInsert, "id" | "created_at">
+  supabaseOrToken: any,
+  notification: Omit<NotificationInsert, "id" | "created_at" | "is_read">
 ): Promise<void> {
   try {
-    const { error } = await supabase.from("notifications").insert({
-      ...notification,
-      created_at: new Date().toISOString(),
+    // Get auth token from supabase session
+    let token: string | null = null;
+
+    if (typeof supabaseOrToken === "string") {
+      token = supabaseOrToken;
+    } else if (supabaseOrToken?.auth?.getSession) {
+      const { data: { session } } = await supabaseOrToken.auth.getSession();
+      token = session?.access_token || null;
+    }
+
+    if (!token) {
+      console.error("No auth token available for notification");
+      return;
+    }
+
+    const response = await fetch("/api/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        user_id: notification.user_id,
+        type: notification.type,
+        title: notification.title,
+        body: notification.body,
+        data: notification.data,
+      }),
     });
 
-    if (error) {
-      console.error("Error creating notification:", error);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("Error creating notification:", errorData);
       // Don't throw - notifications are non-critical
     }
   } catch (error) {

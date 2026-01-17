@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,7 +49,6 @@ export function NewChatDialog({
   onRoomCreated,
 }: NewChatDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [chatType, setChatType] = useState<"direct" | "group">("direct");
@@ -93,73 +92,24 @@ export function NewChatDialog({
     setLoading(true);
 
     try {
-      // Check if a direct chat already exists between these two users
-      const { data: existingRooms } = await supabase
-        .from("chat_rooms")
-        .select(`
-          id,
-          chat_participants (user_id)
-        `)
-        .eq("organization_id", profile.organization_id)
-        .eq("type", "direct");
-
-      // Find existing room
-      const existingRoom = existingRooms?.find((room) => {
-        const participantIds = room.chat_participants?.map((p: { user_id: string }) => p.user_id) || [];
-        return (
-          participantIds.length === 2 &&
-          participantIds.includes(profile.id) &&
-          participantIds.includes(selectedMember.id)
-        );
+      // Create direct chat via API (handles existing room check)
+      const response = await apiPost<{ id: string }>("/api/chat/rooms", {
+        type: "direct",
+        participant_ids: [selectedMember.id],
       });
 
-      if (existingRoom) {
-        // Use existing room
-        onRoomCreated(existingRoom.id);
-        onOpenChange(false);
-        resetForm();
-        router.refresh();
-        return;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to create chat");
       }
 
-      // Create new direct chat room
-      const { data: newRoom, error: roomError } = await supabase
-        .from("chat_rooms")
-        .insert({
-          organization_id: profile.organization_id,
-          type: "direct",
-          is_private: true,
-          created_by: profile.id,
-        })
-        .select()
-        .single();
-
-      if (roomError) throw roomError;
-
-      // Add participants
-      const { error: participantError } = await supabase
-        .from("chat_participants")
-        .insert([
-          { room_id: newRoom.id, user_id: profile.id, role: "member" },
-          { room_id: newRoom.id, user_id: selectedMember.id, role: "member" },
-        ]);
-
-      if (participantError) throw participantError;
-
       toast.success("Chat created");
-      onRoomCreated(newRoom.id);
+      onRoomCreated(response.data!.id);
       onOpenChange(false);
       resetForm();
       router.refresh();
     } catch (error: unknown) {
-      const err = error as { message?: string; code?: string; details?: string; hint?: string };
-      console.error("Chat creation error:", {
-        message: err?.message,
-        code: err?.code,
-        details: err?.details,
-        hint: err?.hint,
-        raw: error,
-      });
+      const err = error as Error;
+      console.error("Chat creation error:", err);
       toast.error(err?.message || "Failed to create chat");
     } finally {
       setLoading(false);
@@ -180,51 +130,25 @@ export function NewChatDialog({
     setLoading(true);
 
     try {
-      // Create group chat room
-      const { data: newRoom, error: roomError } = await supabase
-        .from("chat_rooms")
-        .insert({
-          organization_id: profile.organization_id,
-          name: groupName.trim(),
-          type: "group",
-          is_private: false,
-          created_by: profile.id,
-        })
-        .select()
-        .single();
+      // Create group chat via API
+      const response = await apiPost<{ id: string }>("/api/chat/rooms", {
+        type: "group",
+        name: groupName.trim(),
+        participant_ids: selectedMembers,
+      });
 
-      if (roomError) throw roomError;
-
-      // Add participants (including creator)
-      const participants = [
-        { room_id: newRoom.id, user_id: profile.id, role: "owner" },
-        ...selectedMembers.map((memberId) => ({
-          room_id: newRoom.id,
-          user_id: memberId,
-          role: "member",
-        })),
-      ];
-
-      const { error: participantError } = await supabase
-        .from("chat_participants")
-        .insert(participants);
-
-      if (participantError) throw participantError;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to create group");
+      }
 
       toast.success("Group created");
-      onRoomCreated(newRoom.id);
+      onRoomCreated(response.data!.id);
       onOpenChange(false);
       resetForm();
       router.refresh();
     } catch (error: unknown) {
-      const err = error as { message?: string; code?: string; details?: string; hint?: string };
-      console.error("Group creation error:", {
-        message: err?.message,
-        code: err?.code,
-        details: err?.details,
-        hint: err?.hint,
-        raw: error,
-      });
+      const err = error as Error;
+      console.error("Group creation error:", err);
       toast.error(err?.message || "Failed to create group");
     } finally {
       setLoading(false);

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { useGeolocation, isInsideGeofence, calculateDistance } from "@/hooks/use-geolocation";
 import { Button } from "@/components/ui/button";
@@ -37,12 +37,29 @@ import {
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 type Location = Database["public"]["Tables"]["locations"]["Row"];
 type TimeEntry = Database["public"]["Tables"]["time_entries"]["Row"];
+type Shift = Database["public"]["Tables"]["shifts"]["Row"];
+
+interface UserShift {
+  id: string;
+  start_time: string;
+  end_time: string;
+  location_id: string | null;
+  location: { id: string; name: string } | null;
+}
+
+interface TimeClockSettings {
+  require_shift_for_clock_in: boolean;
+  allow_early_clock_in_minutes: number;
+  allow_late_clock_in_minutes: number;
+}
 
 interface TimeClockWidgetProps {
   profile: Profile;
   locations: Location[];
   currentEntry: TimeEntry | null;
   todayEntries: TimeEntry[];
+  userTodayShifts?: UserShift[];
+  timeClockSettings?: TimeClockSettings;
 }
 
 type ClockStatus = "clocked_out" | "clocked_in" | "on_break";
@@ -52,14 +69,53 @@ export function TimeClockWidget({
   locations,
   currentEntry,
   todayEntries,
+  userTodayShifts = [],
+  timeClockSettings = {
+    require_shift_for_clock_in: false,
+    allow_early_clock_in_minutes: 30,
+    allow_late_clock_in_minutes: 60,
+  },
 }: TimeClockWidgetProps) {
   const router = useRouter();
-  const supabase = createClient();
   const { position, loading: geoLoading, error: geoError, getPosition } = useGeolocation();
 
+  // Filter out shifts that are already clocked in
+  const clockedInShiftIds = useMemo(() => {
+    return todayEntries
+      .filter((e) => e.entry_type === "clock_in" && e.shift_id)
+      .map((e) => e.shift_id);
+  }, [todayEntries]);
+
+  const availableShifts = useMemo(() => {
+    return userTodayShifts.filter((shift) => !clockedInShiftIds.includes(shift.id));
+  }, [userTodayShifts, clockedInShiftIds]);
+
+  // Auto-select shift if only one available
+  const [selectedShiftId, setSelectedShiftId] = useState<string>("");
+
+  useEffect(() => {
+    if (availableShifts.length === 1) {
+      setSelectedShiftId(availableShifts[0].id);
+    } else {
+      setSelectedShiftId("");
+    }
+  }, [availableShifts]);
+
+  const selectedShift = availableShifts.find((s) => s.id === selectedShiftId);
+
+  // Auto-set location from selected shift
   const [selectedLocationId, setSelectedLocationId] = useState<string>(
     locations.length === 1 ? locations[0].id : ""
   );
+
+  useEffect(() => {
+    if (selectedShift?.location_id) {
+      setSelectedLocationId(selectedShift.location_id);
+    } else if (locations.length === 1) {
+      setSelectedLocationId(locations[0].id);
+    }
+  }, [selectedShift, locations]);
+
   const [loading, setLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -107,18 +163,6 @@ export function TimeClockWidget({
     getPosition();
   }, [getPosition]);
 
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'time-clock/widget.tsx:108',message:'Component state - locations and selectedLocationId',data:{locationsCount:locations.length,locations:locations.map(l=>({id:l.id,name:l.name})),selectedLocationId,initialSelectedLocationId:locations.length===1?locations[0]?.id:'',todayEntriesCount:todayEntries.length,status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  }, [locations, selectedLocationId, todayEntries, status]);
-  // #endregion
-
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'time-clock/widget.tsx:108',message:'Geolocation state update',data:{geoLoading,geoError,hasPosition:!!position,positionAccuracy:position?.accuracy,positionLat:position?.latitude,positionLng:position?.longitude},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  }, [geoLoading, geoError, position]);
-  // #endregion
-
   const selectedLocation = locations.find((l) => l.id === selectedLocationId);
 
   // Check if user is within geofence
@@ -149,62 +193,74 @@ export function TimeClockWidget({
   })();
 
   const createTimeEntry = async (entryType: string) => {
-    // Only require location selection if locations are available
-    if (!selectedLocationId && entryType === "clock_in" && locations.length > 0) {
-      toast.error("Please select a location");
-      return;
-    }
+    // Check shift requirement for clock_in
+    if (entryType === "clock_in") {
+      if (timeClockSettings.require_shift_for_clock_in && !selectedShiftId) {
+        if (availableShifts.length === 0) {
+          toast.error("No shifts available for today. Please contact your manager.");
+          return;
+        }
+        toast.error("Please select a shift");
+        return;
+      }
 
-    if (entryType === "clock_in" && isWithinGeofence === false && selectedLocation?.geofence_enabled && !selectedLocation?.allow_clock_outside) {
-      toast.error("You must be within the work location to clock in", {
-        duration: 5000,
-        className: "!text-xl !p-6 !min-w-[400px]",
-      });
-      return;
+      // Only require location selection if locations are available and no shift selected
+      if (!selectedLocationId && locations.length > 0) {
+        toast.error("Please select a location");
+        return;
+      }
+
+      if (isWithinGeofence === false && selectedLocation?.geofence_enabled && !selectedLocation?.allow_clock_outside) {
+        toast.error("You must be within the work location to clock in", {
+          duration: 5000,
+          className: "!text-xl !p-6 !min-w-[400px]",
+        });
+        return;
+      }
     }
 
     setLoading(true);
 
     try {
-      // Find today's shift for this user (for clock_in)
-      let shiftId: string | null = null;
-      if (entryType === "clock_in") {
-        const today = new Date();
-        const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
-        const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+      // Map entry type to API endpoint
+      const endpointMap: Record<string, string> = {
+        clock_in: "/api/time-clock/clock-in",
+        clock_out: "/api/time-clock/clock-out",
+        break_start: "/api/time-clock/break-start",
+        break_end: "/api/time-clock/break-end",
+      };
 
-        const { data: todayShift } = await supabase
-          .from("shifts")
-          .select("id")
-          .eq("user_id", profile.id)
-          .eq("organization_id", profile.organization_id)
-          .gte("start_time", todayStart.toISOString())
-          .lte("start_time", todayEnd.toISOString())
-          .order("start_time", { ascending: true })
-          .limit(1)
-          .single();
-
-        shiftId = todayShift?.id || null;
-      } else {
-        // For other entry types, use the shift_id from the most recent clock_in
-        const lastClockIn = todayEntries.find((e) => e.entry_type === "clock_in");
-        shiftId = lastClockIn?.shift_id || null;
+      const endpoint = endpointMap[entryType];
+      if (!endpoint) {
+        throw new Error(`Unknown entry type: ${entryType}`);
       }
 
-      const { error } = await supabase.from("time_entries").insert({
-        organization_id: profile.organization_id,
-        user_id: profile.id,
-        entry_type: entryType,
-        timestamp: new Date().toISOString(),
-        latitude: position?.latitude,
-        longitude: position?.longitude,
-        accuracy_meters: position?.accuracy,
-        location_id: selectedLocationId || null,
-        is_inside_geofence: isWithinGeofence,
-        shift_id: shiftId,
-      });
+      // Build request body based on entry type
+      const body: Record<string, unknown> = {};
 
-      if (error) throw error;
+      // Add coordinates if available
+      if (position?.latitude && position?.longitude) {
+        body.coordinates = {
+          lat: position.latitude,
+          lng: position.longitude,
+        };
+      }
+
+      // Add location_id and shift_id for clock_in
+      if (entryType === "clock_in") {
+        if (selectedLocationId) {
+          body.location_id = selectedLocationId;
+        }
+        if (selectedShiftId) {
+          body.shift_id = selectedShiftId;
+        }
+      }
+
+      const response = await apiPost(endpoint, body);
+
+      if (!response.success) {
+        throw new Error(response.error || "Failed to record time entry");
+      }
 
       const messages: Record<string, string> = {
         clock_in: "Clocked in successfully",
@@ -215,8 +271,9 @@ export function TimeClockWidget({
 
       toast.success(messages[entryType] || "Entry recorded");
       router.refresh();
-    } catch (error) {
-      toast.error("Failed to record time entry");
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to record time entry";
+      toast.error(errorMessage);
       console.error(error);
     } finally {
       setLoading(false);
@@ -344,8 +401,79 @@ export function TimeClockWidget({
             </div>
           )}
 
-          {/* Location Selection - Only show when there are multiple locations */}
-          {status === "clocked_out" && locations.length > 1 && (
+          {/* Shift Selection - Show when clocked out and shifts exist */}
+          {status === "clocked_out" && availableShifts.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                Shift {timeClockSettings.require_shift_for_clock_in && <span className="text-destructive">*</span>}
+              </label>
+              {availableShifts.length === 1 ? (
+                <div className="p-3 border rounded-md bg-muted/50">
+                  <div className="font-medium">
+                    {new Date(availableShifts[0].start_time).toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: true,
+                    })}
+                    {" - "}
+                    {new Date(availableShifts[0].end_time).toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: true,
+                    })}
+                  </div>
+                  {availableShifts[0].location && (
+                    <div className="text-sm text-muted-foreground">
+                      {availableShifts[0].location.name}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Select
+                  value={selectedShiftId}
+                  onValueChange={setSelectedShiftId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select shift" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableShifts.map((shift) => (
+                      <SelectItem key={shift.id} value={shift.id}>
+                        {new Date(shift.start_time).toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                        })}
+                        {" - "}
+                        {new Date(shift.end_time).toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                        })}
+                        {shift.location && ` (${shift.location.name})`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          )}
+
+          {/* No shifts available warning */}
+          {status === "clocked_out" && timeClockSettings.require_shift_for_clock_in && availableShifts.length === 0 && (
+            <div className="p-3 border border-amber-200 rounded-md bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm font-medium">No shifts scheduled for today</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Contact your manager to be assigned a shift.
+              </p>
+            </div>
+          )}
+
+          {/* Location Selection - Show when shift doesn't have location or multiple locations available */}
+          {status === "clocked_out" && !selectedShift?.location_id && locations.length > 1 && (
             <div className="space-y-2">
               <label className="text-sm font-medium">Work Location</label>
               <Select
@@ -433,27 +561,24 @@ export function TimeClockWidget({
           <div className="space-y-2 pt-4">
             {status === "clocked_out" && (
               <>
-                {/* #region agent log */}
-                {(() => {
-                  // Allow clock in when no locations exist, otherwise require location selection
-                  const isDisabled = loading || geoLoading || (locations.length > 0 && !selectedLocationId);
-                  fetch('http://127.0.0.1:7244/ingest/5c628d44-070d-4c4e-8f24-ef49dbed185b',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'time-clock/widget.tsx:397',message:'Clock In button disabled state',data:{status,isDisabled,loading,geoLoading,selectedLocationId,hasSelectedLocation:!!selectedLocationId,locationsCount:locations.length,locationsIds:locations.map(l=>l.id),isButtonShown:status==='clocked_out'},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-                  return null;
-                })()}
-                {/* #endregion */}
                 <Button
                   className="w-full"
                   size="lg"
                   onClick={() => createTimeEntry("clock_in")}
-                  disabled={loading || geoLoading || (locations.length > 0 && !selectedLocationId)}
+                  disabled={
+                    loading ||
+                    geoLoading ||
+                    (locations.length > 0 && !selectedLocationId && !selectedShift?.location_id) ||
+                    (timeClockSettings.require_shift_for_clock_in && !selectedShiftId)
+                  }
                 >
-                {loading ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <LogIn className="w-4 h-4 mr-2" />
-                )}
-                Clock In
-              </Button>
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <LogIn className="w-4 h-4 mr-2" />
+                  )}
+                  Clock In
+                </Button>
               </>
             )}
 

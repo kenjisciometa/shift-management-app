@@ -15,6 +15,7 @@ import {
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { apiGet, apiPut } from "@/lib/api-client";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { TimesheetTable } from "./timesheet-table";
@@ -73,7 +74,6 @@ export function TimesheetsContainer({
   initialLocations,
   initialEmployees,
 }: TimesheetsContainerProps) {
-  const supabase = createClient();
   const access = useTimesheetAccess(profile);
 
   // State
@@ -122,92 +122,30 @@ export function TimesheetsContainer({
       const startDate = format(dateRange.start, "yyyy-MM-dd");
       const endDate = format(dateRange.end, "yyyy-MM-dd");
 
-      // Build query for time entries grouped by date and user
-      let query = supabase
-        .from("time_entries")
-        .select(`
-          id,
-          user_id,
-          timestamp,
-          entry_type,
-          location_id,
-          is_manual,
-          notes,
-          status,
-          profiles!time_entries_user_id_fkey (
-            id,
-            first_name,
-            last_name,
-            display_name,
-            employee_code
-          ),
-          locations (
-            id,
-            name
-          )
-        `)
-        .eq("organization_id", profile.organization_id)
-        .gte("timestamp", `${startDate}T00:00:00`)
-        .lte("timestamp", `${endDate}T23:59:59`);
+      // Build query params
+      const params = new URLSearchParams({
+        start_date: startDate,
+        end_date: endDate,
+      });
 
-      // Apply role-based filtering
-      if (!access.canViewAllTimesheets) {
-        query = query.eq("user_id", profile.id);
-      } else if (employeeFilter !== "all") {
-        query = query.eq("user_id", employeeFilter);
+      if (employeeFilter !== "all") {
+        params.set("employee_id", employeeFilter);
       }
-
-      // Apply location filter
       if (locationFilter !== "all") {
-        query = query.eq("location_id", locationFilter);
+        params.set("location_id", locationFilter);
       }
 
-      const { data: timeEntries, error } = await query;
+      // Fetch time entries and shifts via API
+      const response = await apiGet(`/api/timesheets/entries-data?${params.toString()}`);
 
-      if (error) {
-        console.error("Error fetching time entries:", error);
+      if (!response.success) {
+        console.error("Error fetching timesheet data:", response.error);
         toast.error("Failed to load timesheet data");
         return;
       }
 
-      // Fetch shifts for the same period to calculate scheduled hours
-      let shiftsQuery = supabase
-        .from("shifts")
-        .select(`
-          id,
-          user_id,
-          start_time,
-          end_time,
-          break_minutes,
-          location_id,
-          position_id,
-          profiles!shifts_user_id_fkey (
-            id,
-            first_name,
-            last_name,
-            display_name,
-            employee_code
-          ),
-          locations (
-            id,
-            name
-          ),
-          positions (
-            id,
-            name
-          )
-        `)
-        .eq("organization_id", profile.organization_id)
-        .gte("start_time", `${startDate}T00:00:00`)
-        .lte("start_time", `${endDate}T23:59:59`);
-
-      if (!access.canViewAllTimesheets) {
-        shiftsQuery = shiftsQuery.eq("user_id", profile.id);
-      } else if (employeeFilter !== "all") {
-        shiftsQuery = shiftsQuery.eq("user_id", employeeFilter);
-      }
-
-      const { data: shifts } = await shiftsQuery;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { timeEntries, shifts } = response.data as { timeEntries: any[]; shifts: any[] };
 
       // Process time entries into table rows with shift data
       const rows = processTimeEntries(timeEntries || [], statusFilter, shifts || []);
@@ -232,10 +170,6 @@ export function TimesheetsContainer({
       setLoading(false);
     }
   }, [
-    supabase,
-    profile.organization_id,
-    profile.id,
-    access.canViewAllTimesheets,
     dateRange,
     statusFilter,
     employeeFilter,
@@ -294,19 +228,11 @@ export function TimesheetsContainer({
    * Handle save entry
    */
   const handleSaveEntry = async (editData: EditEntryData) => {
-    // TODO: Implement API call to update time entry
-    // For now, just refresh the data
-    console.log("Saving entry:", editData);
-
     // Call API to update time entries
-    const response = await fetch(`/api/timesheets/entries/${editData.entryId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editData),
-    });
+    const response = await apiPut(`/api/timesheets/entries/${editData.entryId}`, editData);
 
-    if (!response.ok) {
-      throw new Error("Failed to update entry");
+    if (!response.success) {
+      throw new Error(response.error || "Failed to update entry");
     }
 
     await fetchData();
@@ -331,18 +257,15 @@ export function TimesheetsContainer({
       }
 
       if (allTimeEntryIds.length > 0) {
-        // Batch update all time entries with new status
-        const { error } = await supabase
-          .from("time_entries")
-          .update({
-            status,
-            approved_at: status === "approved" ? new Date().toISOString() : null,
-            approved_by: status === "approved" ? profile.id : null,
-            updated_at: new Date().toISOString(),
-          })
-          .in("id", allTimeEntryIds);
+        // Batch update all time entries with new status using API
+        const response = await apiPut("/api/time-entries/bulk-status", {
+          entry_ids: allTimeEntryIds,
+          status,
+        });
 
-        if (error) throw error;
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update status");
+        }
       }
 
       toast.success(`${entryIds.length} entries updated to ${status}`);
@@ -384,7 +307,14 @@ export function TimesheetsContainer({
     }
 
     try {
-      const response = await fetch(`/api/timesheets/export?${params.toString()}`);
+      // Get auth token for the request
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const response = await fetch(`/api/timesheets/export?${params.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
 
       if (!response.ok) {
         throw new Error("Export failed");

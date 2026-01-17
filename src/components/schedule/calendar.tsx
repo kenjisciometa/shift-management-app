@@ -35,7 +35,7 @@ import {
   differenceInMinutes,
 } from "date-fns";
 import type { Database } from "@/types/database.types";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -152,7 +152,6 @@ export function ScheduleCalendar({
 }: ScheduleCalendarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabase = createClient();
 
   // Parse schedule settings with defaults
   const settings: TeamSettings = {
@@ -210,12 +209,15 @@ export function ScheduleCalendar({
   const handlePublishSelected = async () => {
     if (selectedShiftIds.size === 0) return;
     try {
-      const { error } = await supabase
-        .from("shifts")
-        .update({ is_published: true })
-        .in("id", Array.from(selectedShiftIds));
+      const response = await apiPost("/api/shifts/bulk", {
+        action: "publish",
+        shift_ids: Array.from(selectedShiftIds),
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to publish shifts");
+      }
+
       toast.success(`${selectedShiftIds.size} shifts published`);
       clearSelection();
       router.refresh();
@@ -234,50 +236,18 @@ export function ScheduleCalendar({
     if (selectedShiftIds.size === 0 || targetDates.length === 0) return;
 
     try {
-      // Get the selected shifts data
-      const selectedShiftsData = shifts.filter((shift) =>
-        selectedShiftIds.has(shift.id)
-      );
+      const response = await apiPost("/api/shifts/bulk", {
+        action: "copy",
+        shift_ids: Array.from(selectedShiftIds),
+        target_dates: targetDates.map((d) => d.toISOString()),
+      });
 
-      // Create copies for each selected date
-      const newShifts: Database["public"]["Tables"]["shifts"]["Insert"][] = [];
-
-      for (const targetDate of targetDates) {
-        for (const shift of selectedShiftsData) {
-          const originalStart = parseISO(shift.start_time);
-          const originalEnd = parseISO(shift.end_time);
-
-          // Calculate new start and end times preserving the time of day
-          const newStart = setMinutes(
-            setHours(targetDate, originalStart.getHours()),
-            originalStart.getMinutes()
-          );
-          const newEnd = setMinutes(
-            setHours(targetDate, originalEnd.getHours()),
-            originalEnd.getMinutes()
-          );
-
-          newShifts.push({
-            organization_id: organizationId,
-            user_id: shift.user_id,
-            location_id: shift.location_id,
-            department_id: shift.department_id,
-            start_time: newStart.toISOString(),
-            end_time: newEnd.toISOString(),
-            position_id: shift.position_id,
-            notes: shift.notes,
-            color: shift.color,
-            is_published: false, // Copied shifts are drafts by default
-          });
-        }
+      if (!response.success) {
+        throw new Error(response.error || "Failed to copy shifts");
       }
 
-      const { error } = await supabase.from("shifts").insert(newShifts);
-
-      if (error) throw error;
-
       toast.success(
-        `Copied ${selectedShiftsData.length} shift${selectedShiftsData.length > 1 ? "s" : ""} to ${targetDates.length} date${targetDates.length > 1 ? "s" : ""}`
+        `Copied ${selectedShiftIds.size} shift${selectedShiftIds.size > 1 ? "s" : ""} to ${targetDates.length} date${targetDates.length > 1 ? "s" : ""}`
       );
       setCopyDialogOpen(false);
       clearSelection();
@@ -291,12 +261,15 @@ export function ScheduleCalendar({
   const handleDeleteSelected = async () => {
     if (selectedShiftIds.size === 0) return;
     try {
-      const { error } = await supabase
-        .from("shifts")
-        .delete()
-        .in("id", Array.from(selectedShiftIds));
+      const response = await apiPost("/api/shifts/bulk", {
+        action: "delete",
+        shift_ids: Array.from(selectedShiftIds),
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to delete shifts");
+      }
+
       toast.success(`${selectedShiftIds.size} shifts deleted`);
       clearSelection();
       router.refresh();
@@ -451,12 +424,11 @@ export function ScheduleCalendar({
         updateData.user_id = targetMemberId;
       }
 
-      const { error } = await supabase
-        .from("shifts")
-        .update(updateData)
-        .eq("id", shift.id);
+      const response = await apiPut(`/api/shifts/${shift.id}`, updateData);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to move shift");
+      }
 
       toast.success("Shift moved successfully");
       router.refresh();
@@ -468,15 +440,14 @@ export function ScheduleCalendar({
 
   const handleUpdateShiftTime = async (shiftId: string, newStartTime: Date, newEndTime: Date) => {
     try {
-      const { error } = await supabase
-        .from("shifts")
-        .update({
-          start_time: newStartTime.toISOString(),
-          end_time: newEndTime.toISOString(),
-        })
-        .eq("id", shiftId);
+      const response = await apiPut(`/api/shifts/${shiftId}`, {
+        start_time: newStartTime.toISOString(),
+        end_time: newEndTime.toISOString(),
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to update shift time");
+      }
 
       toast.success("Shift time updated successfully");
       router.refresh();

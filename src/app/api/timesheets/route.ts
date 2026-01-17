@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 import type { Database } from "@/types/database.types";
 
 type TimesheetInsert = Database["public"]["Tables"]["timesheets"]["Insert"];
@@ -8,14 +9,13 @@ type TimesheetInsert = Database["public"]["Tables"]["timesheets"]["Insert"];
  * GET /api/timesheets
  * List timesheets for the current user or all timesheets (admin only)
  */
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("user_id");
     const status = searchParams.get("status");
@@ -24,10 +24,8 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get("limit") || "50");
     const offset = parseInt(searchParams.get("offset") || "0");
 
-    const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+    const isAdmin = isPrivilegedUser(profile.role);
     const targetUserId = userId || (isAdmin ? null : user.id);
-
-    const supabase = await getCachedSupabase();
 
     let query = supabase
       .from("timesheets")
@@ -55,10 +53,10 @@ export async function GET(request: Request) {
       query = query.lte("period_end", periodEnd);
     }
 
-    const { data: timesheets, error } = await query;
+    const { data: timesheets, error: fetchError } = await query;
 
-    if (error) {
-      console.error("Error fetching timesheets:", error);
+    if (fetchError) {
+      console.error("Error fetching timesheets:", fetchError);
       return NextResponse.json({ error: "Failed to fetch timesheets" }, { status: 500 });
     }
 
@@ -73,14 +71,13 @@ export async function GET(request: Request) {
  * POST /api/timesheets
  * Create a new timesheet
  */
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const body = await request.json();
 
     const { period_start, period_end, user_id } = body;
@@ -96,14 +93,12 @@ export async function POST(request: Request) {
     const targetUserId = user_id || user.id;
 
     // Only allow creating timesheets for yourself unless admin
-    const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+    const isAdmin = isPrivilegedUser(profile.role);
     if (targetUserId !== user.id && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Check if timesheet already exists for this period
-    const supabase = await getCachedSupabase();
-
     const { data: existing } = await supabase
       .from("timesheets")
       .select("id")
@@ -132,7 +127,7 @@ export async function POST(request: Request) {
       overtime_hours: null,
     };
 
-    const { data: newTimesheet, error } = await supabase
+    const { data: newTimesheet, error: createError } = await supabase
       .from("timesheets")
       .insert(timesheetData)
       .select(`
@@ -141,8 +136,8 @@ export async function POST(request: Request) {
       `)
       .single();
 
-    if (error) {
-      console.error("Error creating timesheet:", error);
+    if (createError) {
+      console.error("Error creating timesheet:", createError);
       return NextResponse.json({ error: "Failed to create timesheet" }, { status: 500 });
     }
 

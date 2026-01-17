@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 import type { Database } from "@/types/database.types";
 
 type PTORequestUpdate = Database["public"]["Tables"]["pto_requests"]["Update"];
@@ -9,21 +10,18 @@ type PTORequestUpdate = Database["public"]["Tables"]["pto_requests"]["Update"];
  * Get a specific PTO request
  */
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
 
-    const supabase = await getCachedSupabase();
-
-    const { data: ptoRequest, error } = await supabase
+    const { data: ptoRequest, error: fetchError } = await supabase
       .from("pto_requests")
       .select(`
         *,
@@ -34,16 +32,16 @@ export async function GET(
       .eq("organization_id", profile.organization_id)
       .single();
 
-    if (error) {
-      if (error.code === "PGRST116") {
+    if (fetchError) {
+      if (fetchError.code === "PGRST116") {
         return NextResponse.json({ error: "PTO request not found" }, { status: 404 });
       }
-      console.error("Error fetching PTO request:", error);
+      console.error("Error fetching PTO request:", fetchError);
       return NextResponse.json({ error: "Failed to fetch PTO request" }, { status: 500 });
     }
 
     // Check if user has access (owner or admin)
-    const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+    const isAdmin = isPrivilegedUser(profile.role);
     if (ptoRequest.user_id !== user.id && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -60,20 +58,17 @@ export async function GET(
  * Update a PTO request (only if pending and user is owner)
  */
 export async function PUT(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
     const body = await request.json();
-
-    const supabase = await getCachedSupabase();
 
     // Get the existing request
     const { data: existingRequest, error: fetchError } = await supabase
@@ -118,7 +113,7 @@ export async function PUT(
       attachment_urls: body.attachment_urls !== undefined ? body.attachment_urls : undefined,
     };
 
-    const { data: updatedRequest, error } = await supabase
+    const { data: updatedRequest, error: updateError } = await supabase
       .from("pto_requests")
       .update(updateData)
       .eq("id", id)
@@ -128,8 +123,8 @@ export async function PUT(
       `)
       .single();
 
-    if (error) {
-      console.error("Error updating PTO request:", error);
+    if (updateError) {
+      console.error("Error updating PTO request:", updateError);
       return NextResponse.json({ error: "Failed to update PTO request" }, { status: 500 });
     }
 
@@ -166,19 +161,16 @@ export async function PUT(
  * Delete a PTO request (only if pending and user is owner)
  */
 export async function DELETE(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
-
-    const supabase = await getCachedSupabase();
 
     // Get the existing request
     const { data: existingRequest, error: fetchError } = await supabase
@@ -205,10 +197,10 @@ export async function DELETE(
     }
 
     // Delete the request
-    const { error } = await supabase.from("pto_requests").delete().eq("id", id);
+    const { error: deleteError } = await supabase.from("pto_requests").delete().eq("id", id);
 
-    if (error) {
-      console.error("Error deleting PTO request:", error);
+    if (deleteError) {
+      console.error("Error deleting PTO request:", deleteError);
       return NextResponse.json({ error: "Failed to delete PTO request" }, { status: 500 });
     }
 

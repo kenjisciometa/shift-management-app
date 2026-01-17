@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 import { format, parseISO } from "date-fns";
 
 /**
@@ -7,21 +8,18 @@ import { format, parseISO } from "date-fns";
  * Export timesheet as PDF or CSV
  */
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const formatType = searchParams.get("format") || "pdf";
-
-    const supabase = await getCachedSupabase();
 
     // Get the timesheet
     const { data: timesheet, error: timesheetError } = await supabase
@@ -39,7 +37,7 @@ export async function GET(
     }
 
     // Check if user has access
-    const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+    const isAdmin = isPrivilegedUser(profile.role);
     if (timesheet.user_id !== user.id && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -64,7 +62,7 @@ export async function GET(
     if (formatType === "pdf") {
       // Generate PDF HTML
       const html = generatePDFHTML(timesheet, timeEntries || []);
-      
+
       // For now, return HTML that can be printed to PDF
       // In production, you might want to use a library like puppeteer or pdfkit
       return new NextResponse(html, {
@@ -238,10 +236,10 @@ function generateCSV(timesheet: any, timeEntries: any[]): string {
 }
 
 function generatePDFHTML(timesheet: any, timeEntries: any[]): string {
-  const employeeName = timesheet.profiles?.display_name || 
+  const employeeName = timesheet.profiles?.display_name ||
     `${timesheet.profiles?.first_name} ${timesheet.profiles?.last_name}`;
   const period = `${format(parseISO(timesheet.period_start), "MMM d")} - ${format(parseISO(timesheet.period_end), "MMM d, yyyy")}`;
-  
+
   const formatHours = (hours: number) => {
     const h = Math.floor(hours);
     const m = Math.round((hours - h) * 60);
@@ -307,7 +305,7 @@ function generatePDFHTML(timesheet: any, timeEntries: any[]): string {
         break;
       case "break_end":
         const breakStart = timeEntries.find(
-          (e) => e.entry_type === "break_start" && 
+          (e) => e.entry_type === "break_start" &&
           format(parseISO(e.timestamp), "yyyy-MM-dd") === dateKey &&
           parseISO(e.timestamp) < entryTime
         );

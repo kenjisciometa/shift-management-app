@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -96,7 +96,6 @@ export function TaskDialog({
   isAdmin,
 }: TaskDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -161,103 +160,54 @@ export function TaskDialog({
 
     try {
       if (task) {
-        // Update existing task
-        const { error: taskError } = await supabase
-          .from("tasks")
-          .update({
-            title: formData.title,
-            description: formData.description || null,
-            priority: formData.priority,
-            status: formData.status,
-            due_date: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
-            completed_at: formData.status === "completed" && task.status !== "completed"
-              ? new Date().toISOString()
-              : formData.status !== "completed" ? null : task.completed_at,
-            completed_by: formData.status === "completed" && task.status !== "completed"
-              ? profile.id
-              : formData.status !== "completed" ? null : task.completed_by,
-          })
-          .eq("id", task.id);
+        // Update existing task via API
+        const taskResponse = await apiPut(`/api/tasks/${task.id}`, {
+          title: formData.title,
+          description: formData.description || null,
+          priority: formData.priority,
+          due_date: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
+        });
 
-        if (taskError) throw taskError;
-
-        // Update assignments
-        // Get current assignment user IDs
-        const currentAssignees = task.task_assignments.map((a) => a.user_id);
-
-        // Find assignees to add
-        const toAdd = formData.assignees.filter((id) => !currentAssignees.includes(id));
-
-        // Find assignees to remove
-        const toRemove = currentAssignees.filter((id) => !formData.assignees.includes(id));
-
-        // Add new assignments
-        if (toAdd.length > 0) {
-          const { error: addError } = await supabase.from("task_assignments").insert(
-            toAdd.map((userId) => ({
-              task_id: task.id,
-              user_id: userId,
-              assigned_by: profile.id,
-            }))
-          );
-          if (addError) throw addError;
+        if (!taskResponse.success) {
+          throw new Error(taskResponse.error || "Failed to update task");
         }
 
-        // Remove old assignments
-        if (toRemove.length > 0) {
-          const { error: removeError } = await supabase
-            .from("task_assignments")
-            .delete()
-            .eq("task_id", task.id)
-            .in("user_id", toRemove);
-          if (removeError) throw removeError;
+        // Update status if changed
+        if (formData.status !== task.status) {
+          const statusResponse = await apiPut(`/api/tasks/${task.id}/status`, {
+            status: formData.status,
+          });
+          if (!statusResponse.success) {
+            console.error("Failed to update status:", statusResponse.error);
+          }
+        }
+
+        // Update assignments using replace mode
+        const currentAssignees = task.task_assignments.map((a) => a.user_id);
+        const assigneesChanged =
+          formData.assignees.length !== currentAssignees.length ||
+          formData.assignees.some((id) => !currentAssignees.includes(id));
+
+        if (assigneesChanged && formData.assignees.length > 0) {
+          await apiPost(`/api/tasks/${task.id}/assignments`, {
+            user_ids: formData.assignees,
+            replace: true,
+          });
         }
 
         toast.success("Task updated");
       } else {
-        // Create new task
-        console.log("Creating task with data:", {
-          organization_id: profile.organization_id,
+        // Create new task via API (includes assignments)
+        const response = await apiPost("/api/tasks", {
           title: formData.title,
-          created_by: profile.id,
+          description: formData.description || null,
+          priority: formData.priority,
+          due_date: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
+          assigned_to: formData.assignees.length > 0 ? formData.assignees : undefined,
         });
 
-        const { data: newTask, error: taskError } = await supabase
-          .from("tasks")
-          .insert({
-            organization_id: profile.organization_id,
-            title: formData.title,
-            description: formData.description || null,
-            priority: formData.priority,
-            status: formData.status,
-            due_date: formData.dueDate ? new Date(formData.dueDate).toISOString() : null,
-            created_by: profile.id,
-          })
-          .select()
-          .single();
-
-        console.log("Task insert result:", { newTask, taskError });
-
-        if (taskError) {
-          console.error("Task insert error:", taskError);
-          throw taskError;
-        }
-
-        // Create assignments
-        if (formData.assignees.length > 0) {
-          console.log("Creating assignments for task:", newTask.id);
-          const { error: assignError } = await supabase.from("task_assignments").insert(
-            formData.assignees.map((userId) => ({
-              task_id: newTask.id,
-              user_id: userId,
-              assigned_by: profile.id,
-            }))
-          );
-          console.log("Assignment insert result:", { assignError });
-          if (assignError) {
-            console.error("Assignment insert error:", assignError);
-            throw assignError;
-          }
+        if (!response.success) {
+          throw new Error(response.error || "Failed to create task");
         }
 
         toast.success("Task created");
@@ -266,13 +216,7 @@ export function TaskDialog({
       onOpenChange(false);
       router.refresh();
     } catch (error: unknown) {
-      // Log detailed error information
       console.error("Task error:", error);
-      if (error && typeof error === "object") {
-        console.error("Error details:", JSON.stringify(error, null, 2));
-        console.error("Error message:", (error as { message?: string }).message);
-        console.error("Error code:", (error as { code?: string }).code);
-      }
       toast.error(task ? "Failed to update task" : "Failed to create task");
     } finally {
       setLoading(false);

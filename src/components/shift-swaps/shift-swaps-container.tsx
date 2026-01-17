@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { apiGet, apiPut, ApiError } from "@/lib/api-client";
 import { ShiftSwapTable } from "./shift-swap-table";
 import { SwapRequestDialog } from "./request-dialog";
 import type { Database } from "@/types/database.types";
@@ -87,7 +87,6 @@ export function ShiftSwapsContainer({
   settings,
 }: ShiftSwapsContainerProps) {
   const router = useRouter();
-  const supabase = createClient();
 
   // State
   const [loading, setLoading] = useState(false);
@@ -248,46 +247,34 @@ export function ShiftSwapsContainer({
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const query = supabase
-        .from("shift_swaps")
-        .select(`
-          *,
-          requester_shift:shifts!shift_swaps_requester_shift_id_fkey (
-            id, start_time, end_time,
-            locations (id, name),
-            positions (id, name, color)
-          ),
-          target_shift:shifts!shift_swaps_target_shift_id_fkey (
-            id, start_time, end_time,
-            locations (id, name),
-            positions (id, name, color)
-          ),
-          requester:profiles!shift_swaps_requester_id_fkey (
-            id, first_name, last_name, display_name, avatar_url
-          ),
-          target:profiles!shift_swaps_target_id_fkey (
-            id, first_name, last_name, display_name, avatar_url
-          )
-        `)
-        .eq("organization_id", profile.organization_id)
-        .order("created_at", { ascending: false });
+      const response = await apiGet<SwapRequest[]>("/api/shift-swaps", {
+        limit: 100,
+      });
 
-      // If not admin, only fetch user's own swaps (as requester or target)
-      if (!isAdmin) {
-        query.or(`requester_id.eq.${profile.id},target_id.eq.${profile.id}`);
+      if (response.success && response.data) {
+        // Transform API response to match expected format
+        const transformedData = (Array.isArray(response.data) ? response.data : []).map((swap: any) => ({
+          ...swap,
+          requester_shift: swap.requester_shift ? {
+            ...swap.requester_shift,
+            locations: swap.requester_shift.location,
+            positions: swap.requester_shift.position,
+          } : null,
+          target_shift: swap.target_shift ? {
+            ...swap.target_shift,
+            locations: swap.target_shift.location,
+            positions: swap.target_shift.position,
+          } : null,
+        }));
+        setSwaps(transformedData);
       }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setSwaps(data || []);
     } catch (error) {
       console.error("Error fetching data:", error);
       toast.error("Failed to load shift swaps");
     } finally {
       setLoading(false);
     }
-  }, [supabase, profile.organization_id, profile.id, isAdmin]);
+  }, []);
 
   /**
    * Update table data when swaps or filters change
@@ -329,64 +316,17 @@ export function ShiftSwapsContainer({
   const handleApprove = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      // Get swap details
-      const { data: swap } = await supabase
-        .from("shift_swaps")
-        .select("requester_shift_id, target_shift_id, requester_id, target_id")
-        .eq("id", swapId)
-        .single();
+      // Approve the swap via API
+      const response = await apiPut(`/api/shift-swaps/${swapId}/approve`);
 
-      if (!swap) throw new Error("Swap request not found");
+      if (!response.success) {
+        throw new Error("Failed to approve swap request");
+      }
 
-      // Update swap status
-      const { error: swapError } = await supabase
-        .from("shift_swaps")
-        .update({
-          status: "approved",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", swapId);
-
-      if (swapError) throw swapError;
-
-      // Update shift assignments (if auto-update is enabled)
+      // If auto-update is enabled, apply to schedule
       if (settings.shiftSwapSettings.autoUpdateSchedule) {
-        let scheduleUpdated = false;
-
-        if (swap.target_shift_id && swap.target_id && swap.requester_id) {
-          // Exchange swap: Both parties have shifts - swap user assignments
-          const { error: shift1Error } = await supabase
-            .from("shifts")
-            .update({ user_id: swap.target_id })
-            .eq("id", swap.requester_shift_id);
-
-          if (shift1Error) throw shift1Error;
-
-          const { error: shift2Error } = await supabase
-            .from("shifts")
-            .update({ user_id: swap.requester_id })
-            .eq("id", swap.target_shift_id);
-
-          if (shift2Error) throw shift2Error;
-          scheduleUpdated = true;
-        } else if (!swap.target_shift_id && swap.target_id && swap.requester_shift_id) {
-          // Give away swap: Transfer requester's shift to the target
-          const { error: shiftError } = await supabase
-            .from("shifts")
-            .update({ user_id: swap.target_id })
-            .eq("id", swap.requester_shift_id);
-
-          if (shiftError) throw shiftError;
-          scheduleUpdated = true;
-        }
-
-        // Mark as applied
-        if (scheduleUpdated) {
-          await supabase
-            .from("shift_swaps")
-            .update({ applied_at: new Date().toISOString() })
-            .eq("id", swapId);
+        const applyResponse = await apiPut(`/api/shift-swaps/${swapId}/apply`);
+        if (applyResponse.success) {
           toast.success("Swap request approved and schedule updated");
         } else {
           toast.success("Swap request approved");
@@ -394,6 +334,7 @@ export function ShiftSwapsContainer({
       } else {
         toast.success("Swap request approved. Click 'Apply' to update the schedule.");
       }
+
       fetchData();
       router.refresh();
     } catch (error) {
@@ -410,16 +351,11 @@ export function ShiftSwapsContainer({
   const handleReject = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      const { error } = await supabase
-        .from("shift_swaps")
-        .update({
-          status: "rejected",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", swapId);
+      const response = await apiPut(`/api/shift-swaps/${swapId}/reject`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error("Failed to reject swap request");
+      }
 
       toast.success("Swap request rejected");
       fetchData();
@@ -438,60 +374,19 @@ export function ShiftSwapsContainer({
   const handleApplyToSchedule = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      // Get swap details
-      const { data: swap } = await supabase
-        .from("shift_swaps")
-        .select("requester_shift_id, target_shift_id, requester_id, target_id, status, applied_at")
-        .eq("id", swapId)
-        .single();
+      const response = await apiPut(`/api/shift-swaps/${swapId}/apply`);
 
-      if (!swap) throw new Error("Swap request not found");
-      if (swap.status !== "approved") throw new Error("Swap request is not approved");
-      if (swap.applied_at) throw new Error("Swap has already been applied");
-
-      let scheduleUpdated = false;
-
-      if (swap.target_shift_id && swap.target_id && swap.requester_id) {
-        // Exchange swap: Both parties have shifts - swap user assignments
-        const { error: shift1Error } = await supabase
-          .from("shifts")
-          .update({ user_id: swap.target_id })
-          .eq("id", swap.requester_shift_id);
-
-        if (shift1Error) throw shift1Error;
-
-        const { error: shift2Error } = await supabase
-          .from("shifts")
-          .update({ user_id: swap.requester_id })
-          .eq("id", swap.target_shift_id);
-
-        if (shift2Error) throw shift2Error;
-        scheduleUpdated = true;
-      } else if (!swap.target_shift_id && swap.target_id && swap.requester_shift_id) {
-        // Give away swap: Transfer requester's shift to the target
-        const { error: shiftError } = await supabase
-          .from("shifts")
-          .update({ user_id: swap.target_id })
-          .eq("id", swap.requester_shift_id);
-
-        if (shiftError) throw shiftError;
-        scheduleUpdated = true;
+      if (!response.success) {
+        throw new Error("Failed to apply swap to schedule");
       }
 
-      // Mark as applied
-      if (scheduleUpdated) {
-        await supabase
-          .from("shift_swaps")
-          .update({ applied_at: new Date().toISOString() })
-          .eq("id", swapId);
-        toast.success("Schedule updated successfully");
-      }
-
+      toast.success("Schedule updated successfully");
       fetchData();
       router.refresh();
     } catch (error) {
       console.error(error);
-      toast.error(error instanceof Error ? error.message : "Failed to apply to schedule");
+      const message = error instanceof ApiError ? error.message : "Failed to apply to schedule";
+      toast.error(message);
     } finally {
       setProcessingId(null);
     }
@@ -503,12 +398,11 @@ export function ShiftSwapsContainer({
   const handleCancel = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      const { error } = await supabase
-        .from("shift_swaps")
-        .update({ status: "cancelled" })
-        .eq("id", swapId);
+      const response = await apiPut(`/api/shift-swaps/${swapId}/cancel`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error("Failed to cancel swap request");
+      }
 
       toast.success("Swap request cancelled");
       fetchData();
@@ -554,21 +448,17 @@ export function ShiftSwapsContainer({
 
       if (requireAdminApproval) {
         // Mark as accepted by target, waiting for admin approval
-        const { error } = await supabase
-          .from("shift_swaps")
-          .update({
-            status: "target_accepted",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", swapId);
+        const response = await apiPut(`/api/shift-swaps/${swapId}/accept`);
 
-        if (error) throw error;
+        if (!response.success) {
+          throw new Error("Failed to accept swap request");
+        }
 
         toast.success("Swap request accepted. Waiting for admin approval.");
       } else {
         // Auto-approve since admin approval is not required
         await handleApprove(swapId);
-        toast.success("Swap request approved and schedule updated.");
+        return; // handleApprove will handle the rest
       }
 
       fetchData();
@@ -587,15 +477,11 @@ export function ShiftSwapsContainer({
   const handleTargetReject = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      const { error } = await supabase
-        .from("shift_swaps")
-        .update({
-          status: "rejected",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", swapId);
+      const response = await apiPut(`/api/shift-swaps/${swapId}/reject`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error("Failed to decline swap request");
+      }
 
       toast.success("Swap request declined");
       fetchData();

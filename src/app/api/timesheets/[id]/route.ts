@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 import type { Database } from "@/types/database.types";
 
 type TimesheetUpdate = Database["public"]["Tables"]["timesheets"]["Update"];
@@ -9,21 +10,18 @@ type TimesheetUpdate = Database["public"]["Tables"]["timesheets"]["Update"];
  * Get a specific timesheet
  */
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
 
-    const supabase = await getCachedSupabase();
-
-    const { data: timesheet, error } = await supabase
+    const { data: timesheet, error: fetchError } = await supabase
       .from("timesheets")
       .select(`
         *,
@@ -33,16 +31,16 @@ export async function GET(
       .eq("organization_id", profile.organization_id)
       .single();
 
-    if (error) {
-      if (error.code === "PGRST116") {
+    if (fetchError) {
+      if (fetchError.code === "PGRST116") {
         return NextResponse.json({ error: "Timesheet not found" }, { status: 404 });
       }
-      console.error("Error fetching timesheet:", error);
+      console.error("Error fetching timesheet:", fetchError);
       return NextResponse.json({ error: "Failed to fetch timesheet" }, { status: 500 });
     }
 
     // Check if user has access (owner or admin)
-    const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+    const isAdmin = isPrivilegedUser(profile.role);
     if (timesheet.user_id !== user.id && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -59,20 +57,17 @@ export async function GET(
  * Update a timesheet (only if draft and user is owner)
  */
 export async function PUT(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
     const body = await request.json();
-
-    const supabase = await getCachedSupabase();
 
     // Get the existing timesheet
     const { data: existingTimesheet, error: fetchError } = await supabase
@@ -95,7 +90,7 @@ export async function PUT(
     }
 
     if (existingTimesheet.user_id !== user.id) {
-      const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+      const isAdmin = isPrivilegedUser(profile.role);
       if (!isAdmin) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
@@ -110,7 +105,7 @@ export async function PUT(
       overtime_hours: body.overtime_hours !== undefined ? body.overtime_hours : undefined,
     };
 
-    const { data: updatedTimesheet, error } = await supabase
+    const { data: updatedTimesheet, error: updateError } = await supabase
       .from("timesheets")
       .update(updateData)
       .eq("id", id)
@@ -120,8 +115,8 @@ export async function PUT(
       `)
       .single();
 
-    if (error) {
-      console.error("Error updating timesheet:", error);
+    if (updateError) {
+      console.error("Error updating timesheet:", updateError);
       return NextResponse.json({ error: "Failed to update timesheet" }, { status: 500 });
     }
 
@@ -137,19 +132,16 @@ export async function PUT(
  * Delete a timesheet (only if draft and user is owner)
  */
 export async function DELETE(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (error || !user || !profile || !supabase) {
+      return error || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { id } = await params;
-
-    const supabase = await getCachedSupabase();
 
     // Get the existing timesheet
     const { data: existingTimesheet, error: fetchError } = await supabase
@@ -172,17 +164,17 @@ export async function DELETE(
     }
 
     if (existingTimesheet.user_id !== user.id) {
-      const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+      const isAdmin = isPrivilegedUser(profile.role);
       if (!isAdmin) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }
 
     // Delete the timesheet
-    const { error } = await supabase.from("timesheets").delete().eq("id", id);
+    const { error: deleteError } = await supabase.from("timesheets").delete().eq("id", id);
 
-    if (error) {
-      console.error("Error deleting timesheet:", error);
+    if (deleteError) {
+      console.error("Error deleting timesheet:", deleteError);
       return NextResponse.json({ error: "Failed to delete timesheet" }, { status: 500 });
     }
 

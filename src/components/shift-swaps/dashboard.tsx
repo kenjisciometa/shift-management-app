@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,50 +83,15 @@ export function ShiftSwapsDashboard({
   isAdmin,
 }: ShiftSwapsDashboardProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  const handleApprove = async (swapId: string, isAdminApproval = false) => {
+  const handleApprove = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      // Get swap details
-      const { data: swap } = await supabase
-        .from("shift_swaps")
-        .select("requester_shift_id, target_shift_id, requester_id, target_id")
-        .eq("id", swapId)
-        .single();
-
-      if (!swap) throw new Error("Swap request not found");
-
-      // Update swap status
-      const { error: swapError } = await supabase
-        .from("shift_swaps")
-        .update({
-          status: "approved",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", swapId);
-
-      if (swapError) throw swapError;
-
-      // If admin approval, actually swap the shifts
-      if (isAdminApproval && swap.target_shift_id && swap.target_id && swap.requester_id) {
-        // Swap the user assignments
-        const { error: shift1Error } = await supabase
-          .from("shifts")
-          .update({ user_id: swap.target_id })
-          .eq("id", swap.requester_shift_id);
-
-        if (shift1Error) throw shift1Error;
-
-        const { error: shift2Error } = await supabase
-          .from("shifts")
-          .update({ user_id: swap.requester_id })
-          .eq("id", swap.target_shift_id);
-
-        if (shift2Error) throw shift2Error;
+      const response = await apiPut(`/api/shift-swaps/${swapId}/approve`, {});
+      if (!response.success) {
+        throw new Error(response.error || "Failed to approve swap request");
       }
 
       toast.success("Swap request approved");
@@ -142,16 +107,10 @@ export function ShiftSwapsDashboard({
   const handleReject = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      const { error } = await supabase
-        .from("shift_swaps")
-        .update({
-          status: "rejected",
-          reviewed_by: profile.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq("id", swapId);
-
-      if (error) throw error;
+      const response = await apiPut(`/api/shift-swaps/${swapId}/reject`, {});
+      if (!response.success) {
+        throw new Error(response.error || "Failed to reject swap request");
+      }
 
       toast.success("Swap request rejected");
       router.refresh();
@@ -166,12 +125,10 @@ export function ShiftSwapsDashboard({
   const handleCancel = async (swapId: string) => {
     setProcessingId(swapId);
     try {
-      const { error } = await supabase
-        .from("shift_swaps")
-        .update({ status: "cancelled" })
-        .eq("id", swapId);
-
-      if (error) throw error;
+      const response = await apiPut(`/api/shift-swaps/${swapId}/cancel`, {});
+      if (!response.success) {
+        throw new Error(response.error || "Failed to cancel swap request");
+      }
 
       toast.success("Swap request cancelled");
       router.refresh();
@@ -488,7 +445,7 @@ export function ShiftSwapsDashboard({
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleApprove(swap.id, true)}
+                            onClick={() => handleApprove(swap.id)}
                             disabled={processingId === swap.id}
                           >
                             {processingId === swap.id ? (

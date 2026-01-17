@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut, apiDelete } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,7 +60,6 @@ import {
   Clock,
   XCircle,
   Briefcase,
-  MapPin,
   UsersRound,
   DollarSign,
   Filter,
@@ -70,7 +69,6 @@ import {
 import { InviteDialog } from "./invite-dialog";
 import { EmployeeDialog } from "./employee-dialog";
 import { PositionDialog } from "@/components/organization/position-dialog";
-import { LocationDialog } from "@/components/organization/location-dialog";
 import { cn } from "@/lib/utils";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
@@ -132,14 +130,11 @@ export function TeamDashboard({
   isAdmin,
 }: TeamDashboardProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [employeeDialogOpen, setEmployeeDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<TeamMember | null>(null);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
-  const [locationDialogOpen, setLocationDialogOpen] = useState(false);
-  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [processingId, setProcessingId] = useState<string | null>(null);
 
@@ -228,12 +223,13 @@ export function TeamDashboard({
   const handleCancelInvitation = async (invitationId: string) => {
     setProcessingId(invitationId);
     try {
-      const { error } = await supabase
-        .from("employee_invitations")
-        .update({ status: "cancelled" })
-        .eq("id", invitationId);
+      const response = await apiPut(`/api/team/invitations/${invitationId}`, {
+        status: "cancelled",
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to cancel invitation");
+      }
 
       toast.success("Invitation cancelled");
       router.refresh();
@@ -248,22 +244,14 @@ export function TeamDashboard({
   const handleResendInvitation = async (invitation: Invitation) => {
     setProcessingId(invitation.id);
     try {
-      // Generate new token and extend expiry
-      const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
+      const response = await apiPut(`/api/team/invitations/${invitation.id}`, {
+        resend: true,
+      });
 
-      const { error } = await supabase
-        .from("employee_invitations")
-        .update({
-          token,
-          expires_at: expiresAt.toISOString(),
-        })
-        .eq("id", invitation.id);
+      if (!response.success) {
+        throw new Error(response.error || "Failed to resend invitation");
+      }
 
-      if (error) throw error;
-
-      // In a real app, you would send an email here
       toast.success("Invitation resent");
       router.refresh();
     } catch (error) {
@@ -277,12 +265,11 @@ export function TeamDashboard({
   const handleDeletePosition = async (positionId: string) => {
     setProcessingId(positionId);
     try {
-      const { error } = await supabase
-        .from("positions")
-        .delete()
-        .eq("id", positionId);
+      const response = await apiDelete(`/api/organization/positions/${positionId}`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to delete position");
+      }
 
       toast.success("Position deleted");
       router.refresh();
@@ -294,37 +281,18 @@ export function TeamDashboard({
     }
   };
 
-  const handleDeleteLocation = async (locationId: string) => {
-    setProcessingId(locationId);
-    try {
-      const { error } = await supabase
-        .from("locations")
-        .delete()
-        .eq("id", locationId);
-
-      if (error) throw error;
-
-      toast.success("Location deleted");
-      router.refresh();
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to delete location");
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
   const handleDeactivateMember = async () => {
     if (!memberToDeactivate) return;
 
     setDeactivating(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ status: "inactive" })
-        .eq("id", memberToDeactivate.id);
+      const response = await apiPut(`/api/team/members/${memberToDeactivate.id}`, {
+        status: "inactive",
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to deactivate member");
+      }
 
       toast.success("Member deactivated successfully");
       setDeactivateDialogOpen(false);
@@ -341,12 +309,13 @@ export function TeamDashboard({
   const handleActivateMember = async (member: TeamMember) => {
     setProcessingId(member.id);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({ status: "active" })
-        .eq("id", member.id);
+      const response = await apiPut(`/api/team/members/${member.id}`, {
+        status: "active",
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to activate member");
+      }
 
       toast.success("Member activated successfully");
       router.refresh();
@@ -367,7 +336,6 @@ export function TeamDashboard({
           {isAdmin && (
             <>
               <TabsTrigger value="positions">Positions</TabsTrigger>
-              <TabsTrigger value="locations">Locations</TabsTrigger>
               <TabsTrigger value="groups">Groups</TabsTrigger>
               <TabsTrigger value="labor-cost">Labor Cost</TabsTrigger>
             </>
@@ -835,113 +803,6 @@ export function TeamDashboard({
           </TabsContent>
         )}
 
-        {/* Locations Tab */}
-        {isAdmin && (
-          <TabsContent value="locations" className="mt-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-semibold">Locations</h2>
-                <p className="text-sm text-muted-foreground">
-                  Manage work locations for geofencing and time tracking
-                </p>
-              </div>
-              <Button
-                onClick={() => {
-                  setSelectedLocation(null);
-                  setLocationDialogOpen(true);
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Location
-              </Button>
-            </div>
-
-            {locations.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                {locations.map((location) => (
-                  <Card key={location.id} className="group">
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-3">
-                          <div className="h-10 w-10 rounded-lg bg-blue-500 flex items-center justify-center">
-                            <MapPin className="h-5 w-5 text-white" />
-                          </div>
-                          <div>
-                            <h3 className="font-medium">{location.name}</h3>
-                            {location.address && (
-                              <p className="text-sm text-muted-foreground">
-                                {location.address}
-                              </p>
-                            )}
-                            <div className="flex items-center gap-2 mt-2">
-                              <Badge variant={location.is_active ? "default" : "secondary"}>
-                                {location.is_active ? "Active" : "Inactive"}
-                              </Badge>
-                              {location.geofence_enabled && (
-                                <Badge variant="outline">
-                                  Geofence: {location.radius_meters}m
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 opacity-0 group-hover:opacity-100"
-                              disabled={processingId === location.id}
-                            >
-                              {processingId === location.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <MoreHorizontal className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setSelectedLocation(location);
-                                setLocationDialogOpen(true);
-                              }}
-                            >
-                              Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => handleDeleteLocation(location.id)}
-                            >
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-10">
-                  <MapPin className="h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">No locations configured</p>
-                  <Button
-                    variant="link"
-                    onClick={() => {
-                      setSelectedLocation(null);
-                      setLocationDialogOpen(true);
-                    }}
-                  >
-                    Add your first location
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-        )}
-
         {/* Groups Tab */}
         {isAdmin && (
           <TabsContent value="groups" className="mt-4">
@@ -1039,14 +900,6 @@ export function TeamDashboard({
         open={positionDialogOpen}
         onOpenChange={setPositionDialogOpen}
         position={selectedPosition}
-        organizationId={profile.organization_id}
-      />
-
-      {/* Location Dialog */}
-      <LocationDialog
-        open={locationDialogOpen}
-        onOpenChange={setLocationDialogOpen}
-        location={selectedLocation}
         organizationId={profile.organization_id}
       />
 

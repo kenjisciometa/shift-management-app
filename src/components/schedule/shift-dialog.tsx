@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO, setHours, setMinutes, addDays, addWeeks, addHours, startOfDay, isBefore, isAfter, isSameDay } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut, apiDelete, apiGet } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Loader2, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Shift = Database["public"]["Tables"]["shifts"]["Row"] & {
@@ -130,7 +130,6 @@ export function ShiftDialog({
   schedulingPreferences,
 }: ShiftDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
 
   // Merge with defaults
   const schedPrefs = {
@@ -157,6 +156,11 @@ export function ShiftDialog({
   const [showAssignPositionDialog, setShowAssignPositionDialog] = useState(false);
   const [pendingPositionId, setPendingPositionId] = useState<string | null>(null);
   const [assigningPosition, setAssigningPosition] = useState(false);
+
+  // Overlap warning dialog state
+  const [showOverlapDialog, setShowOverlapDialog] = useState(false);
+  const [overlapShifts, setOverlapShifts] = useState<Array<{ id: string; start_time: string; end_time: string; location?: { name: string } | null }>>([]);
+  const [pendingPublishMode, setPendingPublishMode] = useState<"single" | "series">("single");
 
   const isEditing = !!shift;
   const isPartOfSeries = shift?.repeat_parent_id !== null && shift?.repeat_parent_id !== undefined;
@@ -222,14 +226,13 @@ export function ShiftDialog({
 
     setAssigningPosition(true);
     try {
-      const { error } = await supabase
-        .from("user_positions")
-        .insert({
-          user_id: formData.userId,
-          position_id: pendingPositionId,
-        });
+      const response = await apiPost(`/api/team/members/${formData.userId}/positions`, {
+        position_id: pendingPositionId,
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to assign position");
+      }
 
       // Update local team member data
       const memberIndex = teamMembers.findIndex((m) => m.id === formData.userId);
@@ -435,6 +438,44 @@ export function ShiftDialog({
     return shift.repeat_parent_id || shift.id;
   };
 
+  // Check for overlapping shifts for the same user
+  const checkOverlappingShifts = async (
+    userId: string,
+    startTime: string,
+    endTime: string,
+    excludeShiftId?: string
+  ): Promise<Array<{ id: string; start_time: string; end_time: string; location?: { name: string } | null }>> => {
+    // Get the date from start_time for the query range
+    const startDate = new Date(startTime);
+    const dateStr = format(startDate, "yyyy-MM-dd");
+
+    // Fetch shifts for the user on that day
+    const response = await apiGet<Array<{
+      id: string;
+      start_time: string;
+      end_time: string;
+      location?: { name: string } | null;
+    }>>(`/api/shifts?user_id=${userId}&start_date=${dateStr}&end_date=${dateStr}`);
+
+    if (!response.success || !response.data) {
+      return [];
+    }
+
+    const newStart = new Date(startTime).getTime();
+    const newEnd = new Date(endTime).getTime();
+
+    // Filter to find overlapping shifts (excluding the current shift if editing)
+    return response.data.filter((s) => {
+      if (excludeShiftId && s.id === excludeShiftId) return false;
+
+      const existingStart = new Date(s.start_time).getTime();
+      const existingEnd = new Date(s.end_time).getTime();
+
+      // Check for overlap: new shift starts before existing ends AND new shift ends after existing starts
+      return newStart < existingEnd && newEnd > existingStart;
+    });
+  };
+
   // Check if publish dialog should be shown
   const checkShowPublishDialog = async () => {
     if (!shift) return false;
@@ -452,15 +493,13 @@ export function ShiftDialog({
     if (!repeatGroupId) return false;
 
     // Count unpublished shifts in the same series
-    const { count, error } = await supabase
-      .from("shifts")
-      .select("*", { count: "exact", head: true })
-      .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`)
-      .eq("is_published", false);
+    const response = await apiGet<{ count: number; shift_ids: string[] }>(
+      `/api/shifts/series/${shift.id}?is_published=false&count_only=true`
+    );
 
-    if (error || !count || count <= 1) return false;
+    if (!response.success || !response.data || response.data.count <= 1) return false;
 
-    setSeriesShiftCount(count);
+    setSeriesShiftCount(response.data.count);
     return true;
   };
 
@@ -481,7 +520,54 @@ export function ShiftDialog({
       }
     }
 
-    await executeSubmit("single");
+    // Check for overlapping shifts
+    await proceedWithOverlapCheck("single");
+  };
+
+  // Check for overlaps and show dialog if needed
+  const proceedWithOverlapCheck = async (publishMode: "single" | "series") => {
+    const [startHour, startMinute] = formData.startTime.split(":").map(Number);
+    const [endHour, endMinute] = formData.endTime.split(":").map(Number);
+    const repeatDates = generateRepeatDates();
+
+    // Check each date for overlaps
+    const allOverlaps: Array<{ id: string; start_time: string; end_time: string; location?: { name: string } | null }> = [];
+
+    for (const date of repeatDates) {
+      const startDateTime = setMinutes(setHours(date, startHour), startMinute);
+      const endDateTime = setMinutes(setHours(date, endHour), endMinute);
+
+      const overlaps = await checkOverlappingShifts(
+        formData.userId,
+        startDateTime.toISOString(),
+        endDateTime.toISOString(),
+        isEditing ? shift?.id : undefined
+      );
+
+      // Add only unique overlaps
+      for (const overlap of overlaps) {
+        if (!allOverlaps.some((o) => o.id === overlap.id)) {
+          allOverlaps.push(overlap);
+        }
+      }
+    }
+
+    if (allOverlaps.length > 0) {
+      setOverlapShifts(allOverlaps);
+      setPendingPublishMode(publishMode);
+      setShowOverlapDialog(true);
+      return;
+    }
+
+    await executeSubmit(publishMode);
+  };
+
+  // Handle overlap dialog confirmation
+  const handleOverlapDialogChoice = (proceed: boolean) => {
+    setShowOverlapDialog(false);
+    if (proceed) {
+      executeSubmit(pendingPublishMode);
+    }
   };
 
   const executeSubmit = async (publishMode: "single" | "series") => {
@@ -498,7 +584,6 @@ export function ShiftDialog({
         const endDateTime = setMinutes(setHours(baseDate, endHour), endMinute);
 
         const shiftData = {
-          organization_id: organizationId,
           user_id: formData.userId,
           start_time: startDateTime.toISOString(),
           end_time: endDateTime.toISOString(),
@@ -509,35 +594,23 @@ export function ShiftDialog({
           notes: formData.notes || null,
           color: positionColor,
           is_published: formData.isPublished,
-          status: formData.isPublished ? "published" : "draft",
-          published_at: formData.isPublished ? new Date().toISOString() : null,
         };
 
         // Update single shift
-        const { error } = await supabase
-          .from("shifts")
-          .update(shiftData)
-          .eq("id", shift.id);
-
-        if (error) throw error;
+        const response = await apiPut(`/api/shifts/${shift.id}`, shiftData);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update shift");
+        }
 
         // If publishing entire series
         if (publishMode === "series" && formData.isPublished) {
-          const repeatGroupId = getRepeatGroupId();
-          if (repeatGroupId) {
-            const { error: seriesError } = await supabase
-              .from("shifts")
-              .update({
-                is_published: true,
-                status: "published",
-                published_at: new Date().toISOString(),
-              })
-              .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`)
-              .eq("is_published", false);
-
-            if (seriesError) throw seriesError;
-            toast.success(`${seriesShiftCount} shifts published successfully`);
+          const seriesResponse = await apiPut(`/api/shifts/series/${shift.id}`, {
+            is_published: true,
+          });
+          if (!seriesResponse.success) {
+            throw new Error(seriesResponse.error || "Failed to publish series");
           }
+          toast.success(`${seriesShiftCount} shifts published successfully`);
         } else {
           toast.success("Shift updated successfully");
         }
@@ -552,7 +625,6 @@ export function ShiftDialog({
           const firstEndDateTime = setMinutes(setHours(firstDate, endHour), endMinute);
 
           const firstShiftData = {
-            organization_id: organizationId,
             user_id: formData.userId,
             start_time: firstStartDateTime.toISOString(),
             end_time: firstEndDateTime.toISOString(),
@@ -563,26 +635,20 @@ export function ShiftDialog({
             notes: formData.notes || null,
             color: positionColor,
             is_published: formData.isPublished,
-            status: formData.isPublished ? "published" : "draft",
-            published_at: formData.isPublished ? new Date().toISOString() : null,
-            repeat_parent_id: null,
           };
 
-          const { data: firstShift, error: firstError } = await supabase
-            .from("shifts")
-            .insert(firstShiftData)
-            .select("id")
-            .single();
+          const firstResponse = await apiPost<{ id: string }>("/api/shifts", firstShiftData);
+          if (!firstResponse.success || !firstResponse.data) {
+            throw new Error(firstResponse.error || "Failed to create shift");
+          }
 
-          if (firstError) throw firstError;
-
-          // Create remaining shifts with repeat_parent_id
-          const remainingShifts = repeatDates.slice(1).map((date) => {
+          // Create remaining shifts with repeat_parent_id linking to the first shift
+          const parentId = firstResponse.data.id;
+          for (const date of repeatDates.slice(1)) {
             const startDateTime = setMinutes(setHours(date, startHour), startMinute);
             const endDateTime = setMinutes(setHours(date, endHour), endMinute);
 
-            return {
-              organization_id: organizationId,
+            await apiPost("/api/shifts", {
               user_id: formData.userId,
               start_time: startDateTime.toISOString(),
               end_time: endDateTime.toISOString(),
@@ -593,14 +659,9 @@ export function ShiftDialog({
               notes: formData.notes || null,
               color: positionColor,
               is_published: formData.isPublished,
-              status: formData.isPublished ? "published" : "draft",
-              published_at: formData.isPublished ? new Date().toISOString() : null,
-              repeat_parent_id: firstShift.id,
-            };
-          });
-
-          const { error: remainingError } = await supabase.from("shifts").insert(remainingShifts);
-          if (remainingError) throw remainingError;
+              repeat_parent_id: parentId,
+            });
+          }
 
           toast.success(`${repeatDates.length} shifts created successfully`);
         } else {
@@ -610,7 +671,6 @@ export function ShiftDialog({
           const endDateTime = setMinutes(setHours(singleDate, endHour), endMinute);
 
           const shiftData = {
-            organization_id: organizationId,
             user_id: formData.userId,
             start_time: startDateTime.toISOString(),
             end_time: endDateTime.toISOString(),
@@ -621,12 +681,12 @@ export function ShiftDialog({
             notes: formData.notes || null,
             color: positionColor,
             is_published: formData.isPublished,
-            status: formData.isPublished ? "published" : "draft",
-            published_at: formData.isPublished ? new Date().toISOString() : null,
           };
 
-          const { error } = await supabase.from("shifts").insert(shiftData);
-          if (error) throw error;
+          const response = await apiPost("/api/shifts", shiftData);
+          if (!response.success) {
+            throw new Error(response.error || "Failed to create shift");
+          }
           toast.success("Shift created successfully");
         }
       }
@@ -641,10 +701,11 @@ export function ShiftDialog({
     }
   };
 
-  const handlePublishDialogChoice = (choice: "single" | "series" | "cancel") => {
+  const handlePublishDialogChoice = async (choice: "single" | "series" | "cancel") => {
     setShowPublishDialog(false);
     if (choice === "cancel") return;
-    executeSubmit(choice);
+    // Check for overlaps before proceeding
+    await proceedWithOverlapCheck(choice);
   };
 
   const handleDelete = async () => {
@@ -653,13 +714,12 @@ export function ShiftDialog({
     // Check if shift is part of a series and count shifts
     const repeatGroupId = getRepeatGroupId();
     if (repeatGroupId) {
-      const { count, error } = await supabase
-        .from("shifts")
-        .select("*", { count: "exact", head: true })
-        .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`);
+      const response = await apiGet<{ count: number; shift_ids: string[] }>(
+        `/api/shifts/series/${shift.id}?count_only=true`
+      );
 
-      if (!error && count && count > 1) {
-        setDeleteSeriesCount(count);
+      if (response.success && response.data && response.data.count > 1) {
+        setDeleteSeriesCount(response.data.count);
       } else {
         setDeleteSeriesCount(0);
       }
@@ -678,19 +738,16 @@ export function ShiftDialog({
 
     try {
       if (mode === "series" && deleteSeriesCount > 1) {
-        const repeatGroupId = getRepeatGroupId();
-        if (repeatGroupId) {
-          const { error } = await supabase
-            .from("shifts")
-            .delete()
-            .or(`repeat_parent_id.eq.${repeatGroupId},id.eq.${repeatGroupId}`);
-
-          if (error) throw error;
-          toast.success(`${deleteSeriesCount} shifts deleted successfully`);
+        const response = await apiDelete(`/api/shifts/series/${shift.id}`);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to delete series");
         }
+        toast.success(`${deleteSeriesCount} shifts deleted successfully`);
       } else {
-        const { error } = await supabase.from("shifts").delete().eq("id", shift.id);
-        if (error) throw error;
+        const response = await apiDelete(`/api/shifts/${shift.id}`);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to delete shift");
+        }
         toast.success("Shift deleted successfully");
       }
 
@@ -1220,6 +1277,53 @@ export function ShiftDialog({
             <AlertDialogAction onClick={handleAssignPosition} disabled={assigningPosition}>
               {assigningPosition && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Assign Position
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Overlap Warning Dialog */}
+      <AlertDialog open={showOverlapDialog} onOpenChange={setShowOverlapDialog}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader className="space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-yellow-100">
+              <AlertTriangle className="h-7 w-7 text-yellow-600" />
+            </div>
+            <AlertDialogTitle className="text-center text-xl">
+              Overlapping Shifts
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center">
+              <span className="font-medium text-foreground">
+                {selectedTeamMember?.display_name ||
+                 (selectedTeamMember ? `${selectedTeamMember.first_name} ${selectedTeamMember.last_name}` : "This employee")}
+              </span>
+              {" "}already has {overlapShifts.length === 1 ? "a shift" : "shifts"} during this time:
+              <div className="mt-3 max-h-32 overflow-y-auto bg-muted/50 rounded-md p-2 text-left text-sm">
+                {overlapShifts.map((s, idx) => (
+                  <div key={s.id} className={cn("py-1", idx > 0 && "border-t border-muted")}>
+                    <span className="font-medium">
+                      {format(parseISO(s.start_time), "MMM d")}
+                    </span>
+                    {" "}
+                    {format(parseISO(s.start_time), "HH:mm")} - {format(parseISO(s.end_time), "HH:mm")}
+                    {s.location?.name && (
+                      <span className="text-muted-foreground"> @ {s.location.name}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3">Do you want to create this shift anyway?</p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col-reverse sm:flex-row sm:justify-center gap-2 mt-4">
+            <AlertDialogCancel onClick={() => handleOverlapDialogChoice(false)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => handleOverlapDialogChoice(true)}
+              className="bg-yellow-600 text-white hover:bg-yellow-700"
+            >
+              Create Anyway
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

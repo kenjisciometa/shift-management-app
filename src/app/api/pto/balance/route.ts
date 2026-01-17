@@ -1,34 +1,33 @@
-import { NextResponse } from "next/server";
-import { getAuthData, getCachedSupabase } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndAuthorize } from "@/app/api/shared/auth";
+import { isPrivilegedUser } from "@/app/api/shared/rbac";
 
 /**
  * GET /api/pto/balance
  * Get PTO balance for the current user or a specific user (admin only)
  */
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const authData = await getAuthData();
-    if (!authData) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const { error: authError, user, profile, supabase } = await authenticateAndAuthorize(request);
+    if (authError || !user || !profile || !supabase) {
+      return authError || NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { user, profile } = authData;
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("user_id");
     const year = searchParams.get("year") || new Date().getFullYear().toString();
 
     // If requesting another user's balance, check if admin
     if (userId && userId !== user.id) {
-      const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
+      const isAdmin = isPrivilegedUser(profile.role);
       if (!isAdmin) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
     }
 
     const targetUserId = userId || user.id;
-    const supabase = await getCachedSupabase();
 
-    const { data: balances, error } = await supabase
+    const { data: balances, error: fetchError } = await supabase
       .from("pto_balances")
       .select(`
         *,
@@ -39,8 +38,8 @@ export async function GET(request: Request) {
       .eq("year", parseInt(year))
       .order("pto_type", { ascending: true });
 
-    if (error) {
-      console.error("Error fetching PTO balance:", error);
+    if (fetchError) {
+      console.error("Error fetching PTO balance:", fetchError);
       return NextResponse.json({ error: "Failed to fetch PTO balance" }, { status: 500 });
     }
 

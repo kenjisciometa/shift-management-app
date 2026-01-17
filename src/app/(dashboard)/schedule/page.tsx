@@ -26,8 +26,20 @@ export default async function SchedulePage({
   const { user, profile } = authData;
   const isAdmin = profile.role === "admin" || profile.role === "owner" || profile.role === "manager";
 
-  // Parse view and date from search params
-  const view = (params.view as "week" | "month" | "day") || "month";
+  const supabase = await getCachedSupabase();
+
+  // Fetch user preferences for default calendar view
+  const { data: userProfile } = await supabase
+    .from("profiles")
+    .select("preferences")
+    .eq("id", user.id)
+    .single();
+
+  const userPreferences = userProfile?.preferences as { calendarView?: string } | null;
+  const defaultView = (userPreferences?.calendarView as "week" | "month" | "day") || "month";
+
+  // Parse view and date from search params (use preference as default)
+  const view = (params.view as "week" | "month" | "day") || defaultView;
   const currentDate = params.date ? parseISO(params.date) : new Date();
 
   // Calculate date range based on view
@@ -46,8 +58,6 @@ export default async function SchedulePage({
     startDate = startOfWeek(currentDate, { weekStartsOn: 0 });
     endDate = endOfWeek(currentDate, { weekStartsOn: 0 });
   }
-
-  const supabase = await getCachedSupabase();
 
   // Parallel fetch all data
   const [shiftsResult, teamMembersResult, locationsResult, departmentsResult, positionsResult, ptoRequestsResult, organizationResult] = await Promise.all([

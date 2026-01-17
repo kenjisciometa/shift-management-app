@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { format, addDays, parseISO, isBefore } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { apiGet, apiPost } from "@/lib/api-client";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -26,7 +26,6 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Calendar, Clock, MapPin, User, ArrowRightLeft, AlertCircle } from "lucide-react";
 import type { TeamSettings } from "@/components/settings/team-settings";
-import { createShiftSwapNotification } from "@/lib/notifications";
 
 interface Profile {
   id: string;
@@ -75,7 +74,6 @@ export function SwapRequestDialog({
   settings,
 }: SwapRequestDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedShiftId, setSelectedShiftId] = useState<string>("");
   const [selectedTargetId, setSelectedTargetId] = useState<string>("");
@@ -136,38 +134,38 @@ export function SwapRequestDialog({
 
     setLoadingTargetShifts(true);
     try {
-      const now = new Date().toISOString();
-      let query = supabase
-        .from("shifts")
-        .select(`
-          id, start_time, end_time,
-          locations (id, name),
-          positions (id, name, color)
-        `)
-        .eq("user_id", targetId)
-        .gte("start_time", now)
-        .order("start_time", { ascending: true })
-        .limit(20);
+      const now = new Date().toISOString().split("T")[0];
+      const params: Record<string, string | number> = {
+        user_id: targetId,
+        start_date: now,
+        limit: 20,
+      };
 
       // Apply maxDaysInAdvance filter
       if (maxDaysInAdvance > 0) {
-        const maxDate = addDays(new Date(), maxDaysInAdvance).toISOString();
-        query = query.lte("start_time", maxDate);
+        const maxDate = addDays(new Date(), maxDaysInAdvance).toISOString().split("T")[0];
+        params.end_date = maxDate;
       }
 
-      const { data, error } = await query;
+      const response = await apiGet<any[]>("/api/shifts", params);
 
-      if (error) throw error;
+      if (response.success && response.data) {
+        // Transform API response to match expected format
+        let filteredData = (Array.isArray(response.data) ? response.data : []).map((shift: any) => ({
+          ...shift,
+          locations: shift.location || null,
+          positions: shift.position || null,
+        }));
 
-      // Filter by position if cross-position swaps are not allowed
-      let filteredData = data || [];
-      if (!allowCrossPositionSwaps && selectedShift?.positions?.id) {
-        filteredData = filteredData.filter(
-          (shift) => shift.positions?.id === selectedShift.positions?.id
-        );
+        // Filter by position if cross-position swaps are not allowed
+        if (!allowCrossPositionSwaps && selectedShift?.positions?.id) {
+          filteredData = filteredData.filter(
+            (shift) => shift.positions?.id === selectedShift.positions?.id
+          );
+        }
+
+        setTargetShifts(filteredData);
       }
-
-      setTargetShifts(filteredData);
     } catch (error) {
       console.error("Error loading target shifts:", error);
       toast.error("Failed to load target's shifts");
@@ -189,69 +187,19 @@ export function SwapRequestDialog({
 
     setIsSubmitting(true);
     try {
-      const { data: newSwap, error } = await supabase
-        .from("shift_swaps")
-        .insert({
-          organization_id: profile.organization_id,
-          requester_id: profile.id,
-          requester_shift_id: selectedShiftId,
-          target_id: selectedTargetId,
-          target_shift_id: selectedTargetShiftId || null,
-          reason: reason.trim() || null,
-          status: "pending",
-        })
-        .select("id")
-        .single();
-
-      if (error) throw error;
-
-      // Get requester's name
-      const requesterName = profile.display_name ||
-        `${profile.first_name || ""} ${profile.last_name || ""}`.trim() ||
-        "A team member";
-
-      // Get target's name
-      const targetMember = teamMembers.find(m => m.id === selectedTargetId);
-      const targetName = targetMember
-        ? (targetMember.display_name || `${targetMember.first_name || ""} ${targetMember.last_name || ""}`.trim())
-        : "Unknown";
-
-      // Send notification to target user
-      await createShiftSwapNotification(supabase, {
-        userId: selectedTargetId,
-        organizationId: profile.organization_id,
-        type: "swap_requested",
-        requesterName,
-        shiftDate: selectedShift?.start_time || new Date().toISOString(),
-        swapId: newSwap.id,
+      const response = await apiPost("/api/shift-swaps", {
+        requester_shift_id: selectedShiftId,
+        target_id: selectedTargetId,
+        target_shift_id: selectedTargetShiftId || undefined,
+        reason: reason.trim() || undefined,
       });
 
-      // Notify managers if setting is enabled
-      const notifyManagers = settings?.shiftSwapSettings?.notifyManagersOnRequest ?? true;
-      if (notifyManagers) {
-        // Fetch managers/admins in the organization
-        const { data: managers } = await supabase
-          .from("profiles")
-          .select("id")
-          .eq("organization_id", profile.organization_id)
-          .in("role", ["admin", "owner", "manager"])
-          .neq("id", profile.id); // Don't notify the requester if they're a manager
-
-        if (managers && managers.length > 0) {
-          // Send notification to each manager
-          for (const manager of managers) {
-            await createShiftSwapNotification(supabase, {
-              userId: manager.id,
-              organizationId: profile.organization_id,
-              type: "swap_manager_notification",
-              requesterName,
-              targetName,
-              shiftDate: selectedShift?.start_time || new Date().toISOString(),
-              swapId: newSwap.id,
-            });
-          }
-        }
+      if (!response.success) {
+        throw new Error("Failed to create swap request");
       }
+
+      // Notifications are now handled server-side by the API
+      // or we can still send them client-side using the notification API
 
       toast.success("Shift swap request sent");
       onOpenChange(false);

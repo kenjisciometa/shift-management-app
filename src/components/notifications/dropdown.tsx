@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { createClient } from "@/lib/supabase/client";
+import { apiGet, apiPut, apiPost } from "@/lib/api-client";
 import type { Database } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -50,6 +51,7 @@ const notificationIcons: Record<string, React.ElementType> = {
 
 export function NotificationDropdown({ profile }: NotificationDropdownProps) {
   const router = useRouter();
+  // Supabase client is kept only for realtime subscriptions
   const supabase = createClient();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,24 +59,21 @@ export function NotificationDropdown({ profile }: NotificationDropdownProps) {
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
 
-  // Fetch notifications
+  // Fetch notifications via API
   useEffect(() => {
     const fetchNotifications = async () => {
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("*")
-        .eq("user_id", profile.id)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      const response = await apiGet<{ notifications: Notification[] }>("/api/notifications", {
+        limit: 20,
+      });
 
-      if (!error && data) {
-        setNotifications(data);
+      if (response.success && response.data?.notifications) {
+        setNotifications(response.data.notifications);
       }
       setLoading(false);
     };
 
     fetchNotifications();
-  }, [profile.id, supabase]);
+  }, [profile.id]);
 
   // Subscribe to new notifications
   useEffect(() => {
@@ -101,12 +100,11 @@ export function NotificationDropdown({ profile }: NotificationDropdownProps) {
   }, [profile.id, supabase]);
 
   const markAsRead = async (notificationId: string) => {
-    const { error } = await supabase
-      .from("notifications")
-      .update({ is_read: true, read_at: new Date().toISOString() })
-      .eq("id", notificationId);
+    const response = await apiPut(`/api/notifications/${notificationId}`, {
+      is_read: true,
+    });
 
-    if (!error) {
+    if (response.success) {
       setNotifications((prev) =>
         prev.map((n) =>
           n.id === notificationId ? { ...n, is_read: true } : n
@@ -119,12 +117,9 @@ export function NotificationDropdown({ profile }: NotificationDropdownProps) {
     const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
     if (unreadIds.length === 0) return;
 
-    const { error } = await supabase
-      .from("notifications")
-      .update({ is_read: true, read_at: new Date().toISOString() })
-      .in("id", unreadIds);
+    const response = await apiPost("/api/notifications/read-all", {});
 
-    if (!error) {
+    if (response.success) {
       setNotifications((prev) =>
         prev.map((n) => ({ ...n, is_read: true }))
       );

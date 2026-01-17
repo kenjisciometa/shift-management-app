@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPut } from "@/lib/api-client";
 import type { Json } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -46,7 +46,6 @@ export function TeamNotificationSettingsComponent({
   initialSettings,
 }: TeamNotificationSettingsComponentProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [saving, setSaving] = useState(false);
 
   const [settings, setSettings] = useState<TeamNotificationSettings>(() => {
@@ -67,14 +66,13 @@ export function TeamNotificationSettingsComponent({
         },
       };
 
-      const { error } = await supabase
-        .from("organizations")
-        .update({
-          settings: updatedSettings as unknown as Json,
-        })
-        .eq("id", organizationId);
+      const response = await apiPut("/api/organization", {
+        settings: updatedSettings as unknown as Json,
+      });
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to save notification settings");
+      }
 
       toast.success("Notification settings saved");
       router.refresh();

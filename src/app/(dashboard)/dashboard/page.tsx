@@ -40,6 +40,8 @@ export default async function DashboardPage() {
     unreadMessagesResult,
     locationsResult,
     todayEntriesResult,
+    userTodayShiftsResult,
+    orgSettingsResult,
   ] = await Promise.all([
     // Today's shifts for the organization
     supabase
@@ -69,12 +71,14 @@ export default async function DashboardPage() {
     // Unread messages for the current user (using RPC or raw count)
     supabase.rpc("count_unread_messages", { user_id: profile.id }),
 
-    // Get locations for the organization (for time clock)
+    // Get locations assigned to the current user (for time clock)
     supabase
-      .from("locations")
-      .select("*")
-      .eq("organization_id", profile.organization_id)
-      .eq("is_active", true),
+      .from("user_locations")
+      .select(`
+        location:locations!inner (*)
+      `)
+      .eq("user_id", user.id)
+      .eq("location.is_active", true),
 
     // Get today's time entries for this user (for time clock)
     supabase
@@ -84,12 +88,45 @@ export default async function DashboardPage() {
       .gte("timestamp", todayMidnight.toISOString())
       .lt("timestamp", tomorrowMidnight.toISOString())
       .order("timestamp", { ascending: false }),
+
+    // Get user's shifts for today (for time clock)
+    supabase
+      .from("shifts")
+      .select(`
+        id,
+        start_time,
+        end_time,
+        location_id,
+        location:locations (id, name)
+      `)
+      .eq("user_id", user.id)
+      .eq("organization_id", profile.organization_id)
+      .eq("is_published", true)
+      .gte("start_time", todayStart)
+      .lte("start_time", todayEnd)
+      .order("start_time", { ascending: true }),
+
+    // Get organization settings for time clock
+    supabase
+      .from("organizations")
+      .select("settings")
+      .eq("id", profile.organization_id)
+      .single(),
   ]);
 
   const todaysShifts = todaysShiftsResult.count || 0;
   const clockedIn = clockedInResult.data || 0;
   const pendingRequests = (pendingPtoResult.count || 0) + (pendingSwapsResult.count || 0);
   const unreadMessages = unreadMessagesResult.data || 0;
+
+  // Extract time-clock settings
+  const orgSettings = (orgSettingsResult.data?.settings as Record<string, unknown>) || {};
+  const timeClockSettings = {
+    require_shift_for_clock_in: false,
+    allow_early_clock_in_minutes: 30,
+    allow_late_clock_in_minutes: 60,
+    ...(orgSettings.time_clock as Record<string, unknown> || {}),
+  };
 
   const displayName =
     profile.display_name || profile.first_name || authData.user.email;
@@ -107,9 +144,11 @@ export default async function DashboardPage() {
           <div className="lg:col-span-2">
             <TimeClockWidget
               profile={profile}
-              locations={locationsResult.data || []}
+              locations={(locationsResult.data || []).map((ul) => ul.location).filter(Boolean)}
               currentEntry={null}
               todayEntries={todayEntriesResult.data || []}
+              userTodayShifts={userTodayShiftsResult.data || []}
+              timeClockSettings={timeClockSettings}
             />
           </div>
 

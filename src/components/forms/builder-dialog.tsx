@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { apiPost, apiPut, apiDelete } from "@/lib/api-client";
 import type { Database, Json } from "@/types/database.types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,7 +69,6 @@ export function FormBuilderDialog({
   organizationId,
 }: FormBuilderDialogProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -158,7 +157,6 @@ export function FormBuilderDialog({
 
     try {
       const templateData = {
-        organization_id: organizationId,
         name: formName.trim(),
         description: formDescription.trim() || null,
         fields: fields as unknown as Json,
@@ -166,17 +164,16 @@ export function FormBuilderDialog({
       };
 
       if (isEditing && template) {
-        const { error } = await supabase
-          .from("form_templates")
-          .update(templateData)
-          .eq("id", template.id);
-
-        if (error) throw error;
+        const response = await apiPut(`/api/forms/templates/${template.id}`, templateData);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to update template");
+        }
         toast.success("Form template updated");
       } else {
-        const { error } = await supabase.from("form_templates").insert(templateData);
-
-        if (error) throw error;
+        const response = await apiPost("/api/forms/templates", templateData);
+        if (!response.success) {
+          throw new Error(response.error || "Failed to create template");
+        }
         toast.success("Form template created");
       }
 
@@ -197,12 +194,11 @@ export function FormBuilderDialog({
     setDeleting(true);
 
     try {
-      const { error } = await supabase
-        .from("form_templates")
-        .delete()
-        .eq("id", template.id);
+      const response = await apiDelete(`/api/forms/templates/${template.id}`);
 
-      if (error) throw error;
+      if (!response.success) {
+        throw new Error(response.error || "Failed to delete template");
+      }
 
       toast.success("Form template deleted");
       onOpenChange(false);

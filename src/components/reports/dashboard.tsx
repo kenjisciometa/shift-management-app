@@ -15,7 +15,7 @@ import {
   subMonths,
   format,
 } from "date-fns";
-import { createClient } from "@/lib/supabase/client";
+import { apiGet } from "@/lib/api-client";
 import {
   Card,
   CardContent,
@@ -188,7 +188,6 @@ export function ReportsDashboard({
   shifts,
   organizationId,
 }: ReportsDashboardProps) {
-  const supabase = createClient();
   const [filterPreset, setFilterPreset] = useState<FilterPreset>("this_month");
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
   const [loading, setLoading] = useState(false);
@@ -204,148 +203,55 @@ export function ReportsDashboard({
   const [filteredDailyShifts, setFilteredDailyShifts] = useState(initialDailyShifts);
   const [filteredPTOBreakdown, setFilteredPTOBreakdown] = useState(initialPTOBreakdown);
 
+  interface DashboardReportData {
+    shifts: {
+      count: number;
+      changePercent: number;
+      dailyCounts: { day: string; shifts: number }[];
+    };
+    workHours: number;
+    pto: {
+      approvedDays: number;
+      breakdown: { type: string; days: number }[];
+    };
+    tasks: {
+      completionRate: number;
+      completed: number;
+      total: number;
+    };
+  }
+
   const fetchFilteredData = useCallback(async (startDate: Date, endDate: Date) => {
     setLoading(true);
 
     try {
-      const [
-        shiftsResult,
-        timeEntriesResult,
-        ptoResult,
-        tasksResult,
-      ] = await Promise.all([
-        // Shifts in date range
-        supabase
-          .from("shifts")
-          .select("id, user_id, start_time, end_time, status")
-          .eq("organization_id", organizationId)
-          .gte("start_time", startDate.toISOString())
-          .lte("start_time", endDate.toISOString()),
-        // Time entries in date range
-        supabase
-          .from("time_entries")
-          .select("id, user_id, entry_type, timestamp")
-          .eq("organization_id", organizationId)
-          .gte("timestamp", startDate.toISOString())
-          .lte("timestamp", endDate.toISOString())
-          .order("timestamp"),
-        // PTO requests in date range
-        supabase
-          .from("pto_requests")
-          .select("id, user_id, pto_type, total_days, status, start_date")
-          .eq("organization_id", organizationId)
-          .gte("start_date", format(startDate, "yyyy-MM-dd"))
-          .lte("start_date", format(endDate, "yyyy-MM-dd")),
-        // Tasks created in date range
-        supabase
-          .from("tasks")
-          .select("id, status, created_at")
-          .eq("organization_id", organizationId)
-          .gte("created_at", startDate.toISOString())
-          .lte("created_at", endDate.toISOString()),
-      ]);
-
-      // Calculate shifts
-      const shiftsData = shiftsResult.data || [];
-      setFilteredShifts(shiftsData.length);
-
-      // Calculate shift change (compare with previous period of same length)
-      const periodLength = endDate.getTime() - startDate.getTime();
-      const prevStart = new Date(startDate.getTime() - periodLength);
-      const prevEnd = new Date(startDate.getTime() - 1);
-
-      const prevShiftsResult = await supabase
-        .from("shifts")
-        .select("id")
-        .eq("organization_id", organizationId)
-        .gte("start_time", prevStart.toISOString())
-        .lte("start_time", prevEnd.toISOString());
-
-      const prevShiftsCount = prevShiftsResult.data?.length || 0;
-      const changePercent = prevShiftsCount > 0
-        ? ((shiftsData.length - prevShiftsCount) / prevShiftsCount) * 100
-        : 0;
-      setFilteredShiftChange(changePercent);
-
-      // Calculate work hours
-      const entries = timeEntriesResult.data || [];
-      let workHours = 0;
-      const userSessions: Record<string, { clockIn?: Date; totalHours: number }> = {};
-
-      entries.forEach((entry) => {
-        if (!userSessions[entry.user_id]) {
-          userSessions[entry.user_id] = { totalHours: 0 };
-        }
-
-        if (entry.entry_type === "clock_in") {
-          userSessions[entry.user_id].clockIn = new Date(entry.timestamp);
-        } else if (entry.entry_type === "clock_out" && userSessions[entry.user_id].clockIn) {
-          const clockIn = userSessions[entry.user_id].clockIn!;
-          const clockOut = new Date(entry.timestamp);
-          const hours = (clockOut.getTime() - clockIn.getTime()) / (1000 * 60 * 60);
-          userSessions[entry.user_id].totalHours += hours;
-          userSessions[entry.user_id].clockIn = undefined;
-        }
+      const response = await apiGet<DashboardReportData>("/api/reports/dashboard", {
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
       });
 
-      Object.values(userSessions).forEach((session) => {
-        workHours += session.totalHours;
-      });
-      setFilteredWorkHours(Math.round(workHours * 10) / 10);
-
-      // Calculate PTO
-      const ptoData = ptoResult.data || [];
-      const approvedPTO = ptoData
-        .filter((r) => r.status === "approved")
-        .reduce((sum, r) => sum + Number(r.total_days), 0);
-      setFilteredPTODays(approvedPTO);
-
-      // PTO breakdown
-      const ptoByType: Record<string, number> = {};
-      ptoData.forEach((req) => {
-        if (!ptoByType[req.pto_type]) {
-          ptoByType[req.pto_type] = 0;
-        }
-        ptoByType[req.pto_type] += Number(req.total_days);
-      });
-      setFilteredPTOBreakdown(
-        Object.entries(ptoByType).map(([type, days]) => ({ type, days }))
-      );
-
-      // Calculate tasks
-      const tasksData = tasksResult.data || [];
-      const completed = tasksData.filter((t) => t.status === "completed").length;
-      const total = tasksData.length;
-      setFilteredCompletedTasks(completed);
-      setFilteredTotalTasks(total);
-      setFilteredTaskRate(total > 0 ? Math.round((completed / total) * 100) : 0);
-
-      // Calculate daily shifts
-      const days: { day: string; shifts: number }[] = [];
-      const dayCount = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-      const maxDays = Math.min(dayCount, 7); // Show max 7 days
-
-      for (let i = 0; i < maxDays; i++) {
-        const date = new Date(startDate);
-        date.setDate(date.getDate() + i);
-        const dayStr = format(date, "yyyy-MM-dd");
-        const count = shiftsData.filter((s) => {
-          const shiftDate = format(new Date(s.start_time), "yyyy-MM-dd");
-          return shiftDate === dayStr;
-        }).length;
-        days.push({
-          day: format(date, "EEE"),
-          shifts: count,
-        });
+      if (!response.success || !response.data) {
+        throw new Error(response.error || "Failed to fetch report data");
       }
-      setFilteredDailyShifts(days);
 
+      const data = response.data;
+
+      // Update state with API response
+      setFilteredShifts(data.shifts.count);
+      setFilteredShiftChange(data.shifts.changePercent);
+      setFilteredDailyShifts(data.shifts.dailyCounts);
+      setFilteredWorkHours(data.workHours);
+      setFilteredPTODays(data.pto.approvedDays);
+      setFilteredPTOBreakdown(data.pto.breakdown);
+      setFilteredTaskRate(data.tasks.completionRate);
+      setFilteredCompletedTasks(data.tasks.completed);
+      setFilteredTotalTasks(data.tasks.total);
     } catch (error) {
       console.error("Error fetching filtered data:", error);
     } finally {
       setLoading(false);
     }
-  }, [organizationId, supabase]);
+  }, []);
 
   useEffect(() => {
     if (filterPreset === "custom" && customDateRange?.from && customDateRange?.to) {
